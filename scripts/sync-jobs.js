@@ -76,7 +76,9 @@ const RESEARCH_THRESHOLD = 15;
 // Map to database schema
 function toDbRow(job) {
   const suitability = job.suitability || 0;
-  const hasResearch = job.directUrl !== undefined || job.redFlags !== undefined;
+  // Check both old (directUrl) and new (directJobUrl) field names for compatibility
+  const directUrl = job.directJobUrl || job.directUrl || null;
+  const hasResearch = directUrl !== null || job.redFlags !== undefined;
 
   return {
     id: job.id,
@@ -96,7 +98,8 @@ function toDbRow(job) {
     suitability: suitability,
     posted_at: job.postedAt || null,
     // Research fields (populated by job search workflow)
-    career_page_url: job.directUrl || null,
+    // directJobUrl = verified link to actual job listing (not guessed careers page)
+    career_page_url: directUrl,
     red_flags: job.redFlags || [],
     research_status: hasResearch ? 'complete' : (suitability >= RESEARCH_THRESHOLD ? 'pending' : 'skipped'),
     researched_at: hasResearch ? new Date().toISOString() : null,

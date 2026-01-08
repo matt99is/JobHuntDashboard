@@ -133,7 +133,13 @@ Task(
   subagent_type: "general-purpose",
   prompt: "Research {company} for '{title}' role.
 
-  1. Find careers page: WebSearch '{company} careers'
+  1. Find the ACTUAL job listing URL:
+     - WebSearch '{company} {title} job' or '{company} careers {title}'
+     - WebFetch the result to VERIFY it exists and contains the role
+     - Only return URL if you confirm the page loads and shows the job
+     - Return null if you can't find a verified direct link
+     - DO NOT guess URLs like 'company.com/careers' - verify or return null
+
   2. Check red flags (only flag if verified):
      - Layoffs 2025 (>10% affected)
      - Glassdoor <3.5 (only if >20 reviews, patterns not individuals)
@@ -141,7 +147,7 @@ Task(
      - High design turnover
 
   Return JSON:
-  {career_page_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
+  {direct_job_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
 )
 ```
 
@@ -149,7 +155,7 @@ Task(
 
 ### Step 4: Update & Sync (Opus)
 
-1. Add `directUrl` and `redFlags` to each job in `candidates/*.json`
+1. Add `directJobUrl` (verified URL or null) and `redFlags` to each job in `candidates/*.json`
 2. Run: `npm run sync`
 
 ---
@@ -219,7 +225,7 @@ All sources use this JSON structure in `candidates/{source}.json`:
   "description": "Brief role summary",
   "suitability": 18,
   "postedAt": "2026-01-01T00:00:00Z",
-  "directUrl": "https://company.com/careers",
+  "directJobUrl": "https://company.com/jobs/ux-designer-123",
   "redFlags": []
 }]
 ```
