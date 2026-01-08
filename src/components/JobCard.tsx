@@ -1,10 +1,36 @@
-import { Job } from '../types/job';
+import { Job, RedFlagType, RedFlagSeverity } from '../types/job';
 
 interface JobCardProps {
   job: Job;
   onStatusChange: (id: string, status: string | null) => void;
   onDelete: (id: string) => void;
 }
+
+// Red flag styling helpers
+const getFlagStyle = (severity: RedFlagSeverity): string => {
+  switch (severity) {
+    case 'high':
+      return 'bg-red-100 text-red-700 border-red-200';
+    case 'medium':
+      return 'bg-amber-100 text-amber-700 border-amber-200';
+    case 'low':
+      return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+    default:
+      return 'bg-gray-100 text-gray-700 border-gray-200';
+  }
+};
+
+const getFlagIcon = (type: RedFlagType): string => {
+  const icons: Record<RedFlagType, string> = {
+    layoffs: '\u26A0\uFE0F',
+    glassdoor_low: '\u2B50',
+    glassdoor_culture: '\u{1F614}',
+    financial: '\u{1F4C9}',
+    turnover: '\u{1F6AA}',
+    news_negative: '\u{1F4F0}',
+  };
+  return icons[type] || '\u26A0\uFE0F';
+};
 
 export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps) {
   const getSuitabilityColor = (score: number) => {
@@ -24,6 +50,11 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
   const isApplied = job.status === 'applied';
   const isSaved = job.status === 'interested';
 
+  // Red flags
+  const hasRedFlags = job.red_flags && job.red_flags.length > 0;
+  const hasHighSeverity = job.red_flags?.some(f => f.severity === 'high') || false;
+  const borderColor = hasHighSeverity ? 'border-l-red-500' : 'border-l-terracotta';
+
   const handleApply = () => {
     if (confirm('Mark this job as applied? This cannot be undone.')) {
       onStatusChange(job.id, 'applied');
@@ -31,7 +62,22 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
   };
 
   return (
-    <div className={`bg-[#F8F5F0] border border-[#E5DED3] p-6 rounded-xl hover:shadow-lg hover:-translate-y-0.5 transition-all duration-150 border-l-4 border-l-terracotta ${isApplied ? 'opacity-60' : ''}`}>
+    <div className={`bg-[#F8F5F0] border border-[#E5DED3] p-6 rounded-xl hover:shadow-lg hover:-translate-y-0.5 transition-all duration-150 border-l-4 ${borderColor} ${isApplied ? 'opacity-60' : ''}`}>
+      {/* Red Flags Row */}
+      {hasRedFlags && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {job.red_flags!.map((flag, idx) => (
+            <span
+              key={idx}
+              className={`text-xs px-2 py-1 rounded-md border ${getFlagStyle(flag.severity)}`}
+              title={flag.details || `${flag.summary} (${flag.source || 'Unknown source'})`}
+            >
+              {getFlagIcon(flag.type)} {flag.summary}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Row 1: Title + Badges */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
@@ -56,10 +102,21 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
         </div>
       </div>
 
-      {/* Row 2: Company · Location */}
+      {/* Row 2: Company · Location · Career Page */}
       <div className="text-sm text-[#4A4A4A] mb-3">
         {job.company}
         {job.location && ` · ${job.location}`}
+        {job.career_page_url && (
+          <a
+            href={job.career_page_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-2 text-terracotta hover:text-terracotta-dark text-xs font-medium"
+            title="View company careers page"
+          >
+            [Careers]
+          </a>
+        )}
       </div>
 
       {/* Row 3: Metadata */}

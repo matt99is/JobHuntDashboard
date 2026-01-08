@@ -3,6 +3,18 @@ export type RoleType = 'ux' | 'product';
 export type ApplicationType = 'direct' | 'recruiter';
 export type Freshness = 'fresh' | 'recent' | 'stale' | 'unknown';
 export type Status = 'new' | 'interested' | 'applied' | 'rejected' | null;
+export type ResearchStatus = 'pending' | 'researching' | 'complete' | 'skipped' | 'failed';
+
+export type RedFlagType = 'layoffs' | 'glassdoor_low' | 'glassdoor_culture' | 'financial' | 'turnover' | 'news_negative';
+export type RedFlagSeverity = 'high' | 'medium' | 'low';
+
+export interface RedFlag {
+  type: RedFlagType;
+  severity: RedFlagSeverity;
+  summary: string;
+  source?: string;
+  details?: string;
+}
 
 export interface Job {
   id: string;
@@ -22,6 +34,11 @@ export interface Job {
   suitability: number;
   created_at: string;
   updated_at: string;
+  // Research fields
+  career_page_url?: string;
+  red_flags?: RedFlag[];
+  research_status?: ResearchStatus;
+  researched_at?: string;
 }
 
 export interface JobImport {
