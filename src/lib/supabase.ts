@@ -10,6 +10,7 @@ export async function getJobs() {
   const { data, error } = await supabase
     .from('jobs')
     .select('*')
+    .neq('status', 'rejected')  // Hide rejected/dismissed jobs
     .order('suitability', { ascending: false });
 
   if (error) throw error;
@@ -26,9 +27,10 @@ export async function updateJobStatus(id: string, status: string | null) {
 }
 
 export async function deleteJob(id: string) {
+  // Soft delete - mark as rejected so it won't resurface in future searches
   const { error } = await supabase
     .from('jobs')
-    .delete()
+    .update({ status: 'rejected' })
     .eq('id', id);
 
   if (error) throw error;

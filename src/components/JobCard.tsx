@@ -174,13 +174,13 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
 
         <button
           onClick={() => {
-            if (confirm('Delete this job?')) {
+            if (confirm('Dismiss this job? It won\'t appear again in future searches.')) {
               onDelete(job.id);
             }
           }}
           className="text-sm text-[#6B6B6B] hover:text-red-600 transition-colors ml-auto underline underline-offset-2"
         >
-          Delete
+          Dismiss
         </button>
       </div>
     </div>
