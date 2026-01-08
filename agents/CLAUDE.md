@@ -14,28 +14,168 @@
 
 ## Full Workflow: "run job search"
 
-### Step 1: Scrape Sources (parallel where possible)
+### Architecture
 
-**LinkedIn (via Gmail)**
 ```
-from:linkedin subject:(job OR opportunity OR role) newer_than:7d
+Phase 1: SCRAPE ──→ Phase 2: FILTER ──→ Phase 3: RESEARCH ──→ Phase 4: SYNC
+   [Haiku x5]          [Opus]             [Haiku xN]           [Opus]
+   (parallel)          (quick)            (parallel)
 ```
-- Read emails, extract job URLs (`linkedin.com/jobs/view/XXXXX`)
-- Fetch each URL for details
 
-**uiuxjobsboard**
-- Fetch: `https://uiuxjobsboard.com/design-jobs/remote-united-kingdom`
+**Token optimization:** Haiku handles all heavy lifting (scraping, research). Opus only orchestrates and filters.
 
-**WorkInStartups**
-- Fetch: `https://workinstartups.com/job-board/jobs/designers`
-- Filter for Manchester/Remote UK
+---
 
-**Indeed** (skip if 403)
-- `https://uk.indeed.com/jobs?q=ux+designer&l=manchester&fromage=14`
+### Step 1: Scrape Sources (Parallel Haiku Agents)
 
-### Step 2: Score & Filter
+**CRITICAL: Launch ALL scraper agents in a SINGLE message with multiple Task calls.**
 
-**Exclude if ANY match:**
+Use `model: "haiku"` and `subagent_type: "general-purpose"` for each:
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ Task 1: LinkedIn/Gmail Agent                                       │
+├────────────────────────────────────────────────────────────────────┤
+│ Search Gmail: from:linkedin subject:(job OR opportunity) newer_than:7d
+│ Extract job URLs (linkedin.com/jobs/view/XXXXX)                    │
+│ Fetch each URL, extract: title, company, location, salary, desc    │
+│ Score each job using criteria below                                │
+│ Return JSON array of jobs                                          │
+└────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────┐
+│ Task 2: uiuxjobsboard Agent                                        │
+├────────────────────────────────────────────────────────────────────┤
+│ Fetch: https://uiuxjobsboard.com/design-jobs/remote-united-kingdom │
+│ Extract all job listings                                           │
+│ Score each job using criteria below                                │
+│ Return JSON array of jobs                                          │
+└────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────┐
+│ Task 3: WorkInStartups Agent                                       │
+├────────────────────────────────────────────────────────────────────┤
+│ Fetch: https://workinstartups.com/job-board/jobs/designers         │
+│ Filter for Manchester/Remote UK only                               │
+│ Score each job using criteria below                                │
+│ Return JSON array of jobs                                          │
+└────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────┐
+│ Task 4: Indeed Agent (skip if 403)                                 │
+├────────────────────────────────────────────────────────────────────┤
+│ Fetch: https://uk.indeed.com/jobs?q=ux+designer&l=manchester&fromage=14
+│ Score each job using criteria below                                │
+│ Return JSON array of jobs                                          │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Each agent prompt must include:**
+1. The source URL(s) to scrape
+2. The scoring criteria (copy from below)
+3. The exclusion rules (copy from below)
+4. Instructions to return a JSON array
+
+**Example Task call:**
+```
+Task(
+  description: "Scrape uiuxjobsboard",
+  model: "haiku",
+  subagent_type: "general-purpose",
+  prompt: "Scrape UX jobs from https://uiuxjobsboard.com/design-jobs/remote-united-kingdom
+
+  For each job extract: title, company, location, salary, description, posted date, URL
+
+  EXCLUDE if: contract/freelance, gambling company, >30 days old, not UK
+
+  SCORE (0-25):
+  - e-commerce, retail, conversion, figma: +3 each
+  - b2b, saas, design system: +2 each
+  - Senior/Lead UX: +3, Mid UX: +2
+  - Remote: +2
+  - £80k+: +3, £65-79k: +2, £50-64k: +1
+
+  Return JSON array with structure:
+  [{title, company, location, source: 'uiuxjobsboard', type: 'direct', url, remote, salary, seniority, roleType, freshness, description, suitability, postedAt}]"
+)
+```
+
+---
+
+### Step 2: Collect & Dedupe (Opus)
+
+After all scraper agents complete:
+
+1. Collect JSON results from each agent
+2. **OVERWRITE** `candidates/{source}.json` (fresh data each search)
+3. Dedupe by company+title (keep highest score)
+4. **Check Supabase** for existing jobs - exclude from research/summary
+5. Filter: keep only NEW jobs with `suitability >= 15` for research
+
+---
+
+### Step 3: Research Companies (Parallel Haiku Agents)
+
+**Before researching, check which jobs are NEW:**
+```bash
+# Query Supabase for existing company+title combinations
+# Only research jobs that don't already exist in the database
+```
+
+**Launch ALL research agents in a SINGLE message.**
+
+For each NEW job with `suitability >= 15` (skip recruiter placeholders):
+
+```
+Task(
+  description: "Research {company}",
+  model: "haiku",
+  subagent_type: "general-purpose",
+  prompt: "Research {company} for '{title}' role.
+
+  1. Find careers page: WebSearch '{company} careers'
+  2. Check red flags (only flag if verified):
+     - Layoffs 2025 (>10% affected)
+     - Glassdoor <3.5 (only if >20 reviews, patterns not individuals)
+     - Financial issues (failed funding, runway)
+     - High design turnover
+
+  Return JSON:
+  {career_page_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
+)
+```
+
+---
+
+### Step 4: Update & Sync (Opus)
+
+1. Add `directUrl` and `redFlags` to each job in `candidates/*.json`
+2. Run: `npm run sync`
+
+---
+
+### Step 5: Report Summary
+
+**IMPORTANT: Only report NEW jobs that were actually synced. Do NOT include:**
+- Jobs already in the database (any status)
+- Jobs that were skipped as duplicates
+
+```
+Job Search Complete
+
+Sources: LinkedIn (3 new), uiuxjobsboard (2 new), WorkInStartups (0)
+Researched: 5 companies, 1 red flag found
+Synced: 5 new jobs
+
+NEW opportunities:
+1. Company - Role (score) - Location - Flags
+```
+
+---
+
+## Scoring & Exclusion Rules
+
+### Exclude if ANY match:
 - Not Manchester / Remote UK / Overseas-with-UK-remote
 - Contract / freelance
 - Gambling (Bet365, Flutter, Entain)
@@ -43,7 +183,7 @@ from:linkedin subject:(job OR opportunity OR role) newer_than:7d
 - Senior Product Designer
 - Junior UX under £50k
 
-**Scoring (0-25):**
+### Scoring (0-25):
 | Factor | Points |
 |--------|--------|
 | e-commerce, retail, user research, conversion, figma | +3 each |
@@ -56,51 +196,6 @@ from:linkedin subject:(job OR opportunity OR role) newer_than:7d
 | £50-64k | +1 |
 | Recruiter InMail | +3 |
 | <2 weeks old | +2 |
-
-### Step 3: Research Companies (suitability >= 15)
-
-**Launch Haiku subagents IN PARALLEL** (single message, multiple Task calls):
-
-```
-Research {company} for "{title}".
-
-1. Find careers page: Search "{company} careers"
-2. Check red flags (only flag if verified):
-   - Layoffs 2025 (>10% affected)
-   - Glassdoor <3.5 (only if >20 reviews, look for patterns)
-   - Financial issues (failed funding, runway)
-   - High design turnover
-
-Return JSON:
-{"career_page_url": "..." or null, "red_flags": [{"type": "layoffs|glassdoor_low|financial|turnover", "severity": "high|medium|low", "summary": "...", "source": "..."}]}
-```
-
-**Skip research for:** Recruiter placeholders ("Client", "Confidential")
-
-### Step 4: Update Candidates & Sync
-
-Add to each researched job in `candidates/*.json`:
-```json
-{
-  "directUrl": "https://company.com/careers",
-  "redFlags": []
-}
-```
-
-Then run: `npm run sync`
-
-### Step 5: Report Summary
-
-```
-Job Search Complete
-
-Sources: LinkedIn (3), uiuxjobsboard (2), WorkInStartups (0)
-Researched: 5 companies, 1 red flag found
-Synced: 5 new jobs
-
-Top opportunities:
-1. Company - Role (score) - Location
-```
 
 ---
 
