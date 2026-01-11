@@ -3,20 +3,10 @@ export default {
   theme: {
     extend: {
       colors: {
-        terracotta: {
-          DEFAULT: '#B8432F',
-          light: '#D4654F',
-          dark: '#8C3224',
-        },
-        cream: {
-          DEFAULT: '#FFFCF7',
-          dark: '#F8F5F0',
-          darker: '#F0EBE3',
-        },
-        border: {
-          light: '#E5DED3',
-          medium: '#D4CCC0',
-          dark: '#B8AFA3',
+        teal: {
+          DEFAULT: '#0D9488',
+          light: '#14B8A6',
+          dark: '#0F766E',
         },
       },
       fontFamily: {

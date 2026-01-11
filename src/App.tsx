@@ -10,7 +10,7 @@ import AddJobModal from './components/AddJobModal';
 export default function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filteredJobs, setFilteredJobs] = useState<Job[]>([]);
-  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('new');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -104,7 +104,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#FFFCF7] flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
         <div className="text-[#6B6B6B]">Loading jobs...</div>
       </div>
     );
@@ -112,14 +112,14 @@ export default function App() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#FFFCF7] flex items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
         <div className="text-red-600">Error: {error}</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#FFFCF7]">
+    <div className="min-h-screen bg-[#FAFAFA]">
       <Header
         jobs={jobs}
         onAddClick={() => setIsAddModalOpen(true)}

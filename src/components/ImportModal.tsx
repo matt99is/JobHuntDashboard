@@ -56,7 +56,7 @@ export default function ImportModal({ isOpen, onClose, onImportComplete }: Impor
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-[#F8F5F0] max-w-2xl w-full p-6 border border-[#E5DED3] rounded-xl shadow-lg">
+      <div className="bg-[#F5F5F5] max-w-2xl w-full p-6 border border-[#D4D4D4] rounded-xl shadow-lg">
         <h2 className="text-2xl font-bold text-[#1A1A1A] mb-4">Import Jobs</h2>
 
         <p className="text-sm text-[#4A4A4A] mb-4">
@@ -67,7 +67,7 @@ export default function ImportModal({ isOpen, onClose, onImportComplete }: Impor
           value={jsonInput}
           onChange={(e) => setJsonInput(e.target.value)}
           placeholder='[{"title": "...", "company": "...", ...}]'
-          className="w-full h-64 p-3 border border-[#D4CCC0] bg-[#FFFCF7] font-mono text-sm focus:outline-none focus:ring-2 focus:ring-terracotta resize-none rounded-lg"
+          className="w-full h-64 p-3 border border-[#A3A3A3] bg-[#FAFAFA] font-mono text-sm focus:outline-none focus:ring-2 focus:ring-teal resize-none rounded-lg"
         />
 
         {error && (
@@ -80,14 +80,14 @@ export default function ImportModal({ isOpen, onClose, onImportComplete }: Impor
           <button
             onClick={onClose}
             disabled={isImporting}
-            className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FFFCF7] border border-[#E5DED3] hover:bg-[#F0EBE3] transition-all duration-150 disabled:opacity-50 rounded-lg"
+            className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FAFAFA] border border-[#D4D4D4] hover:bg-[#E5E5E5] transition-all duration-150 disabled:opacity-50 rounded-lg"
           >
             Cancel
           </button>
           <button
             onClick={handleImport}
             disabled={!jsonInput.trim() || isImporting}
-            className="px-4 py-2 text-sm font-medium text-[#FFFCF7] bg-terracotta hover:bg-terracotta-dark transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+            className="px-4 py-2 text-sm font-medium text-[#FAFAFA] bg-teal hover:bg-teal-dark transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
           >
             {isImporting ? 'Importing...' : 'Import'}
           </button>

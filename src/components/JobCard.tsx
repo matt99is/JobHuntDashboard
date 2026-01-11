@@ -69,10 +69,10 @@ const getFlagIcon = (type: RedFlagType): string => {
 
 export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps) {
   const getSuitabilityColor = (score: number) => {
-    if (score >= 15) return 'bg-terracotta text-white';
-    if (score >= 10) return 'bg-blue-500 text-white';
-    if (score >= 6) return 'bg-yellow-500 text-white';
-    return 'bg-gray-400 text-white';
+    if (score >= 15) return 'bg-green-500 text-white';
+    if (score >= 10) return 'bg-yellow-500 text-white';
+    if (score >= 6) return 'bg-orange-500 text-white';
+    return 'bg-red-500 text-white';
   };
 
   const getSuitabilityLabel = (score: number) => {
@@ -88,7 +88,7 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
   // Red flags
   const hasRedFlags = job.red_flags && job.red_flags.length > 0;
   const hasHighSeverity = job.red_flags?.some(f => f.severity === 'high') || false;
-  const borderColor = hasHighSeverity ? 'border-l-red-500' : 'border-l-terracotta';
+  const borderColor = hasHighSeverity ? 'border-l-red-500' : 'border-l-teal';
 
   const handleApply = () => {
     if (confirm('Mark this job as applied?')) {
@@ -109,7 +109,7 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
   };
 
   return (
-    <div className={`bg-[#F8F5F0] border border-[#E5DED3] p-6 rounded-xl hover:shadow-lg hover:-translate-y-0.5 transition-all duration-150 border-l-4 ${borderColor} ${isTerminal ? 'opacity-60' : ''}`}>
+    <div className={`bg-[#F5F5F5] border border-[#D4D4D4] p-6 rounded-xl hover:shadow-lg hover:-translate-y-0.5 transition-all duration-150 border-l-4 ${borderColor} ${isTerminal ? 'opacity-60' : ''}`}>
       {/* Red Flags Row */}
       {hasRedFlags && (
         <div className="flex flex-wrap gap-2 mb-3">
@@ -134,17 +134,17 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
           </div>
           <div className="flex flex-wrap gap-2">
             {job.remote && (
-              <span className="text-xs px-2 py-1 bg-[#F0EBE3] text-[#4A4A4A] border border-[#E5DED3] rounded-md">
+              <span className="text-xs px-2 py-1 bg-[#E5E5E5] text-[#4A4A4A] border border-[#D4D4D4] rounded-md">
                 Remote
               </span>
             )}
             {job.salary && (
-              <span className="text-xs px-2 py-1 bg-[#F0EBE3] text-[#4A4A4A] border border-[#E5DED3] rounded-md">
+              <span className="text-xs px-2 py-1 bg-[#E5E5E5] text-[#4A4A4A] border border-[#D4D4D4] rounded-md">
                 {job.salary}
               </span>
             )}
             {(job.seniority === 'senior' || job.seniority === 'lead') && (
-              <span className="text-xs px-2 py-1 bg-[#F0EBE3] text-[#4A4A4A] border border-[#E5DED3] rounded-md">
+              <span className="text-xs px-2 py-1 bg-[#E5E5E5] text-[#4A4A4A] border border-[#D4D4D4] rounded-md">
                 {job.seniority}
               </span>
             )}
@@ -162,7 +162,7 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
             href={job.career_page_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="ml-2 text-terracotta hover:text-terracotta-dark text-xs font-medium"
+            className="ml-2 text-teal hover:text-teal-dark text-xs font-medium"
             title="View company careers page"
           >
             [Careers]
@@ -190,13 +190,13 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-4 pt-3 border-t border-[#E5DED3]">
+      <div className="flex items-center gap-4 pt-3 border-t border-[#D4D4D4]">
         {job.url && (
           <a
             href={job.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-terracotta hover:text-terracotta-dark font-medium transition-colors underline underline-offset-2"
+            className="text-sm text-teal hover:text-teal-dark font-medium transition-colors underline underline-offset-2"
           >
             View
           </a>
@@ -206,7 +206,7 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
         {status === 'new' && (
           <button
             onClick={handleApply}
-            className="text-sm text-terracotta hover:text-terracotta-dark font-medium transition-colors underline underline-offset-2"
+            className="text-sm text-teal hover:text-teal-dark font-medium transition-colors underline underline-offset-2"
           >
             Mark Applied
           </button>
@@ -216,7 +216,7 @@ export default function JobCard({ job, onStatusChange, onDelete }: JobCardProps)
           <>
             <button
               onClick={handleInterview}
-              className="text-sm text-terracotta hover:text-terracotta-dark font-medium transition-colors underline underline-offset-2"
+              className="text-sm text-teal hover:text-teal-dark font-medium transition-colors underline underline-offset-2"
             >
               Interview
             </button>

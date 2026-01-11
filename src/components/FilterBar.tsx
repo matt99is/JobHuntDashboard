@@ -27,7 +27,7 @@ export default function FilterBar({ jobs, activeFilter, onFilterChange }: Filter
   ];
 
   return (
-    <div className="border-b border-[#E5DED3] bg-[#F0EBE3]">
+    <div className="border-b border-[#D4D4D4] bg-[#E5E5E5]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex flex-wrap gap-2">
           {filters.map(filter => {
@@ -39,8 +39,8 @@ export default function FilterBar({ jobs, activeFilter, onFilterChange }: Filter
                 className={`
                   px-4 py-2 text-sm font-medium transition-all duration-150 rounded-lg
                   ${isActive
-                    ? 'bg-terracotta text-[#FFFCF7] shadow-sm'
-                    : 'bg-[#F8F5F0] text-[#1A1A1A] border border-[#E5DED3] hover:bg-[#FFFCF7] hover:shadow-sm'
+                    ? 'bg-teal text-[#FAFAFA] shadow-sm'
+                    : 'bg-[#F5F5F5] text-[#1A1A1A] border border-[#D4D4D4] hover:bg-[#FAFAFA] hover:shadow-sm'
                   }
                 `}
               >

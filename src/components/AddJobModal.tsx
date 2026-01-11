@@ -85,12 +85,12 @@ export default function AddJobModal({ isOpen, onClose, onAddComplete }: AddJobMo
     }
   };
 
-  const inputClass = "w-full px-3 py-2 border border-[#D4CCC0] bg-[#FFFCF7] focus:outline-none focus:ring-2 focus:ring-terracotta text-sm rounded-lg";
+  const inputClass = "w-full px-3 py-2 border border-[#A3A3A3] bg-[#FAFAFA] focus:outline-none focus:ring-2 focus:ring-teal text-sm rounded-lg";
   const labelClass = "block text-sm font-medium text-[#1A1A1A] mb-1";
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-[#F8F5F0] max-w-2xl w-full p-6 border border-[#E5DED3] rounded-xl shadow-lg my-8">
+      <div className="bg-[#F5F5F5] max-w-2xl w-full p-6 border border-[#D4D4D4] rounded-xl shadow-lg my-8">
         <h2 className="text-2xl font-bold text-[#1A1A1A] mb-4">Add Job</h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -249,19 +249,19 @@ export default function AddJobModal({ isOpen, onClose, onAddComplete }: AddJobMo
             </p>
           </div>
 
-          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-[#E5DED3]">
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-[#D4D4D4]">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FFFCF7] border border-[#E5DED3] hover:bg-[#F0EBE3] transition-all duration-150 disabled:opacity-50 rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FAFAFA] border border-[#D4D4D4] hover:bg-[#E5E5E5] transition-all duration-150 disabled:opacity-50 rounded-lg"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-[#FFFCF7] bg-terracotta hover:bg-terracotta-dark transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-[#FAFAFA] bg-teal hover:bg-teal-dark transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
             >
               {isSubmitting ? 'Adding...' : 'Add Job'}
             </button>

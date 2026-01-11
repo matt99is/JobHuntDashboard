@@ -14,20 +14,20 @@ export default function Header({ jobs, onAddClick, onImportClick }: HeaderProps)
   const offerCount = jobs.filter(j => j.status === 'offer').length;
 
   return (
-    <header className="border-b border-[#E5DED3] bg-[#F8F5F0]">
+    <header className="border-b border-[#D4D4D4] bg-[#F5F5F5]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-3xl font-bold text-[#1A1A1A]">Job Hunt</h1>
           <div className="flex gap-3">
             <button
               onClick={onImportClick}
-              className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FFFCF7] border border-[#E5DED3] hover:bg-[#F0EBE3] transition-all duration-150 rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-[#1A1A1A] bg-[#FAFAFA] border border-[#D4D4D4] hover:bg-[#E5E5E5] transition-all duration-150 rounded-lg"
             >
               Import
             </button>
             <button
               onClick={onAddClick}
-              className="px-4 py-2 text-sm font-medium text-[#FFFCF7] bg-terracotta hover:bg-terracotta-dark transition-all duration-150 rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-[#FAFAFA] bg-teal hover:bg-teal-dark transition-all duration-150 rounded-lg"
             >
               + Add Job
             </button>
