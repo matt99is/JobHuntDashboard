@@ -18,11 +18,11 @@
 
 ```
 Phase 1: SCRAPE ──→ Phase 2: FILTER ──→ Phase 3: RESEARCH ──→ Phase 4: SYNC
-   [Haiku x5]          [Opus]             [Haiku xN]           [Opus]
+   [Haiku x5]          [Sonnet]           [Haiku xN]           [Sonnet]
    (parallel)          (quick)            (parallel)
 ```
 
-**Token optimization:** Haiku handles all heavy lifting (scraping, research). Opus only orchestrates and filters.
+**Token optimization:** Haiku handles all heavy lifting (scraping, research). Sonnet only orchestrates and filters. Do NOT use Opus for this project.
 
 ---
 
@@ -74,7 +74,14 @@ Use `model: "haiku"` and `subagent_type: "general-purpose"` for each:
 1. The source URL(s) to scrape
 2. The scoring criteria (copy from below)
 3. The exclusion rules (copy from below)
-4. Instructions to return a JSON array
+4. Instructions to detect recruiters (see below)
+5. Instructions to return a JSON array
+
+**Recruiter Detection:**
+Set `type: "recruiter"` if ANY of these match:
+- Company name contains: recruitment, recruiter, talent, staffing, personnel, search, recruiting, headhunter, executive search, job board, careers platform
+- Job description contains: "our client", "on behalf of", "for our client", "client is seeking"
+- Known intermediaries: Oliver Bernard, Zebra People, Hays, Reed, Michael Page, Robert Half, Innova Recruitment, Jobgether, Huzzle, Indeed, LinkedIn (when acting as job board), etc.
 
 **Example Task call:**
 ```
@@ -88,6 +95,11 @@ Task(
 
   EXCLUDE if: contract/freelance, gambling company, >30 days old, not UK
 
+  DETECT RECRUITERS - Set type='recruiter' if:
+  - Company name contains: recruitment, recruiter, talent, staffing, personnel, search, recruiting, headhunter, executive search, job board, careers platform
+  - Description contains: "our client", "on behalf of", "for our client", "client is seeking"
+  - Known: Oliver Bernard, Zebra People, Hays, Reed, Michael Page, Robert Half, Innova Recruitment, Jobgether, Huzzle
+
   SCORE (0-25):
   - e-commerce, retail, conversion, figma: +3 each
   - b2b, saas, design system: +2 each
@@ -96,13 +108,13 @@ Task(
   - £80k+: +3, £65-79k: +2, £50-64k: +1
 
   Return JSON array with structure:
-  [{title, company, location, source: 'uiuxjobsboard', type: 'direct', url, remote, salary, seniority, roleType, freshness, description, suitability, postedAt}]"
+  [{title, company, location, source: 'uiuxjobsboard', type: 'direct' or 'recruiter', url, remote, salary, seniority, roleType, freshness, description, suitability, postedAt}]"
 )
 ```
 
 ---
 
-### Step 2: Collect & Dedupe (Opus)
+### Step 2: Collect & Dedupe (Sonnet)
 
 After all scraper agents complete:
 
@@ -133,29 +145,38 @@ Task(
   subagent_type: "general-purpose",
   prompt: "Research {company} for '{title}' role.
 
-  1. Find the ACTUAL job listing URL:
+  1. Identify if company is a recruiter/intermediary:
+     - Check if company is a recruitment agency, staffing firm, job board, or job aggregator
+     - Check if they describe themselves as placing candidates or listing jobs for other companies
+     - Look for phrases like "our client", "on behalf of" in job descriptions
+     - Set is_recruiter: true/false
+
+  2. Find the ACTUAL job listing URL:
      - WebSearch '{company} {title} job' or '{company} careers {title}'
      - WebFetch the result to VERIFY it exists and contains the role
      - Only return URL if you confirm the page loads and shows the job
      - Return null if you can't find a verified direct link
      - DO NOT guess URLs like 'company.com/careers' - verify or return null
 
-  2. Check red flags (only flag if verified):
+  3. Check red flags (only flag if verified):
      - Layoffs 2025 (>10% affected)
      - Glassdoor <3.5 (only if >20 reviews, patterns not individuals)
      - Financial issues (failed funding, runway)
      - High design turnover
 
   Return JSON:
-  {direct_job_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
+  {is_recruiter: true/false, direct_job_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
 )
 ```
 
 ---
 
-### Step 4: Update & Sync (Opus)
+### Step 4: Update & Sync (Sonnet)
 
-1. Add `directJobUrl` (verified URL or null) and `redFlags` to each job in `candidates/*.json`
+1. For each researched job in `candidates/*.json`:
+   - Add `directJobUrl` (verified URL or null)
+   - Add `redFlags` array
+   - **UPDATE `type` to "recruiter"** if research found `is_recruiter: true`
 2. Run: `npm run sync`
 
 ---
