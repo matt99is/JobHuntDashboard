@@ -1,7 +1,7 @@
 {
   "name": "job-hunt-dashboard",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "sync": "node scripts/sync-jobs.js",
     "reset": "node scripts/reset-db.js",
-    "update-research": "node scripts/update-research.js"
+    "update-research": "node scripts/update-research.js",
+    "auto-ghost": "node scripts/auto-ghost.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

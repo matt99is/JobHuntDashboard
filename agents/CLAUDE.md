@@ -281,7 +281,63 @@ All sources use this JSON structure in `candidates/{source}.json`:
 ## NPM Scripts
 
 ```bash
-npm run dev      # Start dashboard localhost:5173
-npm run sync     # Sync candidates to Supabase
-npm run build    # Production build
+npm run dev         # Start dashboard localhost:5173
+npm run sync        # Sync candidates to Supabase
+npm run auto-ghost  # Mark stale applications as ghosted
+npm run build       # Production build
 ```
+
+---
+
+## Development Workflow
+
+### TODO-Driven Development
+
+When implementing features or fixes, use inline TODOs to track incomplete work:
+
+```javascript
+// TODO: [MISSING] Description of what needs to be implemented
+// TODO: [REFACTOR] Description of improvement needed
+// TODO: [TEST] Description of test needed
+```
+
+**Rules:**
+- Insert TODOs at the EXACT code location where work is needed
+- Use categories: `[MISSING]`, `[REFACTOR]`, `[TEST]`, `[DEFERRED]`
+- Resolve TODOs before marking work complete
+- Never claim "done" if TODOs remain in modified files
+
+### Making Changes
+
+1. **Read first** - Understand existing code before modifying
+2. **Small commits** - One feature/fix per commit
+3. **Test locally** - Run `npm run dev` and verify changes
+4. **Update types** - Keep `src/types/job.ts` in sync with schema changes
+
+### Model Usage
+
+| Task | Model | Why |
+|------|-------|-----|
+| Scraping (parallel) | Haiku | Fast, cheap, handles web fetching |
+| Company research | Haiku | Parallel execution, simple task |
+| Orchestration | Sonnet | Coordinates workflow, filters results |
+| Complex features | Sonnet | Code generation, refactoring |
+
+**Never use Opus** - too token-heavy for this project.
+
+### Application Status Flow
+
+```
+new ──→ awaiting ──→ interview ──→ offer
+           │             │
+           ▼             ▼
+        ghosted      rejected
+```
+
+When user clicks "Mark Applied":
+1. `status` → `awaiting`
+2. `applied_at` → current timestamp
+
+After 30 days with no update:
+- GitHub Actions runs `auto-ghost.js`
+- `status` → `ghosted`
