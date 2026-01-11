@@ -1,6 +1,6 @@
 import { Job } from '../types/job';
 
-export type FilterType = 'all' | 'new' | 'interested' | 'applied' | 'remote' | 'direct' | 'ux' | 'product';
+export type FilterType = 'all' | 'new' | 'awaiting' | 'interview' | 'offer' | 'remote' | 'direct' | 'ux' | 'product';
 
 interface FilterBarProps {
   jobs: Job[];
@@ -10,16 +10,18 @@ interface FilterBarProps {
 
 export default function FilterBar({ jobs, activeFilter, onFilterChange }: FilterBarProps) {
   const newCount = jobs.filter(j => j.status === 'new').length;
-  const savedCount = jobs.filter(j => j.status === 'interested').length;
-  const appliedCount = jobs.filter(j => j.status === 'applied').length;
+  const awaitingCount = jobs.filter(j => j.status === 'awaiting').length;
+  const interviewCount = jobs.filter(j => j.status === 'interview').length;
+  const offerCount = jobs.filter(j => j.status === 'offer').length;
 
   const filters: { id: FilterType; label: string; count?: number }[] = [
     { id: 'all', label: 'All' },
     { id: 'new', label: 'New', count: newCount },
-    { id: 'interested', label: 'Saved', count: savedCount },
-    { id: 'applied', label: 'Applied', count: appliedCount },
-    { id: 'remote', label: '🏠 Remote' },
-    { id: 'direct', label: '🎯 Direct' },
+    { id: 'awaiting', label: 'Awaiting', count: awaitingCount },
+    { id: 'interview', label: 'Interview', count: interviewCount },
+    { id: 'offer', label: 'Offers', count: offerCount },
+    { id: 'remote', label: 'Remote' },
+    { id: 'direct', label: 'Direct' },
     { id: 'ux', label: 'UX' },
     { id: 'product', label: 'Product' },
   ];

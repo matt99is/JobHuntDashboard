@@ -9,8 +9,9 @@ interface HeaderProps {
 export default function Header({ jobs, onAddClick, onImportClick }: HeaderProps) {
   const total = jobs.length;
   const newCount = jobs.filter(j => j.status === 'new').length;
-  const savedCount = jobs.filter(j => j.status === 'interested').length;
-  const appliedCount = jobs.filter(j => j.status === 'applied').length;
+  const awaitingCount = jobs.filter(j => j.status === 'awaiting').length;
+  const interviewCount = jobs.filter(j => j.status === 'interview').length;
+  const offerCount = jobs.filter(j => j.status === 'offer').length;
 
   return (
     <header className="border-b border-[#E5DED3] bg-[#F8F5F0]">
@@ -33,7 +34,7 @@ export default function Header({ jobs, onAddClick, onImportClick }: HeaderProps)
           </div>
         </div>
         <div className="text-sm text-[#4A4A4A] font-mono">
-          {total} roles · {newCount} new · {savedCount} saved · {appliedCount} applied
+          {total} roles · {newCount} new · {awaitingCount} awaiting · {interviewCount} interview · {offerCount} offers
         </div>
       </div>
     </header>

@@ -39,11 +39,14 @@ export default function App() {
       case 'new':
         filtered = filtered.filter(j => j.status === 'new');
         break;
-      case 'interested':
-        filtered = filtered.filter(j => j.status === 'interested');
+      case 'awaiting':
+        filtered = filtered.filter(j => j.status === 'awaiting');
         break;
-      case 'applied':
-        filtered = filtered.filter(j => j.status === 'applied');
+      case 'interview':
+        filtered = filtered.filter(j => j.status === 'interview');
+        break;
+      case 'offer':
+        filtered = filtered.filter(j => j.status === 'offer');
         break;
       case 'remote':
         filtered = filtered.filter(j => j.remote);
@@ -62,11 +65,24 @@ export default function App() {
     setFilteredJobs(filtered);
   }, [jobs, activeFilter]);
 
-  const handleStatusChange = async (id: string, status: string | null) => {
+  const handleStatusChange = async (
+    id: string,
+    status: string | null,
+    extras?: { interview_date?: string; outcome_notes?: string }
+  ) => {
     try {
-      await updateJobStatus(id, status);
+      await updateJobStatus(id, status, extras);
+      // Determine the actual status (applied -> awaiting)
+      const actualStatus = status === 'applied' ? 'awaiting' : status;
       setJobs(jobs.map(job =>
-        job.id === id ? { ...job, status: status as any } : job
+        job.id === id ? {
+          ...job,
+          status: actualStatus as any,
+          applied_at: status === 'applied' ? new Date().toISOString() : job.applied_at,
+          interview_date: extras?.interview_date || job.interview_date,
+          outcome_at: ['offer', 'rejected', 'ghosted'].includes(status || '') ? new Date().toISOString() : job.outcome_at,
+          outcome_notes: extras?.outcome_notes || job.outcome_notes,
+        } : job
       ));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update status');

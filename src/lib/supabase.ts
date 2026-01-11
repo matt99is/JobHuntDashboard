@@ -10,17 +10,51 @@ export async function getJobs() {
   const { data, error } = await supabase
     .from('jobs')
     .select('*')
-    .neq('status', 'rejected')  // Hide rejected/dismissed jobs
+    .not('status', 'in', '("rejected","ghosted")')  // Hide rejected/dismissed and ghosted jobs
     .order('suitability', { ascending: false });
 
   if (error) throw error;
   return data;
 }
 
-export async function updateJobStatus(id: string, status: string | null) {
+export async function getArchivedJobs() {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .in('status', ['offer', 'rejected', 'ghosted'])
+    .order('outcome_at', { ascending: false, nullsFirst: false });
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateJobStatus(
+  id: string,
+  status: string | null,
+  extras?: { interview_date?: string; outcome_notes?: string }
+) {
+  const updates: Record<string, unknown> = { status };
+
+  // Auto-set timeline fields based on status transition
+  if (status === 'applied') {
+    updates.applied_at = new Date().toISOString();
+    updates.status = 'awaiting';  // Immediately transition to awaiting
+  }
+
+  if (status === 'interview' && extras?.interview_date) {
+    updates.interview_date = extras.interview_date;
+  }
+
+  if (['offer', 'rejected', 'ghosted'].includes(status || '')) {
+    updates.outcome_at = new Date().toISOString();
+    if (extras?.outcome_notes) {
+      updates.outcome_notes = extras.outcome_notes;
+    }
+  }
+
   const { error } = await supabase
     .from('jobs')
-    .update({ status })
+    .update(updates)
     .eq('id', id);
 
   if (error) throw error;

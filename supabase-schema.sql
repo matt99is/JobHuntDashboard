@@ -13,7 +13,7 @@ create table jobs (
   freshness text check (freshness in ('fresh', 'recent', 'stale', 'unknown')),
   description text,
   source text,
-  status text check (status in ('new', 'interested', 'applied', 'rejected')),
+  status text check (status in ('new', 'interested', 'applied', 'awaiting', 'interview', 'offer', 'rejected', 'ghosted')),
   suitability integer check (suitability >= 0 and suitability <= 25),
   posted_at timestamp with time zone,
   created_at timestamp with time zone default now(),
@@ -22,13 +22,19 @@ create table jobs (
   career_page_url text,
   red_flags jsonb default '[]',
   research_status text default 'pending' check (research_status in ('pending', 'researching', 'complete', 'skipped', 'failed')),
-  researched_at timestamp with time zone
+  researched_at timestamp with time zone,
+  -- Application tracking fields
+  applied_at timestamp with time zone,
+  interview_date timestamp with time zone,
+  outcome_at timestamp with time zone,
+  outcome_notes text
 );
 
 -- Index for common queries
 create index idx_jobs_status on jobs(status);
 create index idx_jobs_suitability on jobs(suitability desc);
 create index idx_jobs_research_status on jobs(research_status);
+create index idx_jobs_applied_at on jobs(applied_at);
 
 -- Updated at trigger
 create or replace function update_updated_at()
@@ -62,4 +68,22 @@ UPDATE jobs SET research_status = CASE
   WHEN suitability >= 15 THEN 'pending'
   ELSE 'skipped'
 END WHERE research_status IS NULL;
+*/
+
+-- Migration: Add application tracking columns
+-- Run these in Supabase SQL editor:
+/*
+-- 1. Expand status constraint to include new statuses
+ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_status_check;
+ALTER TABLE jobs ADD CONSTRAINT jobs_status_check
+  CHECK (status IN ('new', 'interested', 'applied', 'awaiting', 'interview', 'offer', 'rejected', 'ghosted'));
+
+-- 2. Add timeline tracking columns
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS applied_at timestamp with time zone;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS interview_date timestamp with time zone;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS outcome_at timestamp with time zone;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS outcome_notes text;
+
+-- 3. Add index for auto-ghost queries
+CREATE INDEX IF NOT EXISTS idx_jobs_applied_at ON jobs(applied_at);
 */
