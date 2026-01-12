@@ -70,14 +70,16 @@ new → applied → awaiting → interview → offer
 | `npm run sync` | Sync candidates to Supabase |
 | `npm run auto-ghost` | Ghost stale applications |
 
-## Auto-Ghost Setup (GitHub Actions)
+## Auto-Ghost Setup (Supabase pg_cron)
 
-Already configured at `.github/workflows/auto-ghost.yml`. Runs daily at 2 AM UTC.
+Uses native Supabase scheduled function. Runs daily at 2 AM UTC.
 
 **To enable:**
-1. Go to GitHub repo → Settings → Secrets → Actions
-2. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-3. Push to GitHub - runs automatically
+1. Go to Supabase Dashboard → Database → Extensions
+2. Enable `pg_cron` extension
+3. Go to SQL Editor → New Query
+4. Run the SQL from `supabase-cron.sql`
+5. Verify with: `SELECT * FROM cron.job;`
 
 ## Tech Stack
 

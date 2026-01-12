@@ -339,5 +339,5 @@ When user clicks "Mark Applied":
 2. `applied_at` → current timestamp
 
 After 30 days with no update:
-- GitHub Actions runs `auto-ghost.js`
+- Supabase pg_cron runs `auto_ghost_jobs()` function daily
 - `status` → `ghosted`
