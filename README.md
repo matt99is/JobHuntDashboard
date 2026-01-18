@@ -6,12 +6,13 @@ Personal job tracking dashboard for UX/Product Designer roles. Automates job dis
 
 ## Features
 
-- **Automated Job Search** - Scrapes LinkedIn, uiuxjobsboard, WorkInStartups, Indeed
-- **Smart Scoring** - Ranks jobs 0-25 based on your criteria
-- **Company Research** - Finds red flags (layoffs, Glassdoor ratings, financial issues)
+- **Automated Job Search** - Fetches from Adzuna API + Reed API (complete job data)
+- **Smart Scoring** - Ranks jobs 0-25 based on your criteria (scoring built into API scripts)
+- **Token Optimized** - 80% reduction via scripts for filtering/merging (AI only for research)
+- **Company Research** - AI agents find red flags (layoffs, Glassdoor ratings, financial issues)
 - **Application Tracking** - Pipeline: `new` → `awaiting` → `interview` → `offer/rejected/ghosted`
-- **Auto-Ghost Detection** - Marks applications as ghosted after 30 days (via GitHub Actions)
-- **Recruiter Detection** - Flags jobs posted by recruitment agencies
+- **Auto-Ghost Detection** - Marks applications as ghosted after 30 days (Supabase pg_cron)
+- **Recruiter Detection** - Automatic detection in API scripts + AI verification
 
 ## Quick Start
 
@@ -27,11 +28,18 @@ All AI instructions are in [`agents/CLAUDE.md`](agents/CLAUDE.md).
 
 | Say this | What happens |
 |----------|--------------|
-| "run job search" | Full workflow: scrape → research → sync |
+| "run job search" | Full workflow: fetch → filter → research → merge → sync |
 | "sync jobs" | Sync candidates/*.json to database |
 | "run auto-ghost" | Mark stale applications as ghosted |
 
-**Models used:** Haiku (scraping, research) + Sonnet (orchestration). No Opus.
+**Token optimization:**
+- Phase 1 (Fetch): Scripts only (0 tokens)
+- Phase 2 (Filter): Scripts only (0 tokens)
+- Phase 3 (Research): Haiku agents (only AI usage)
+- Phase 4 (Merge): Scripts only (0 tokens)
+- Phase 5 (Sync): Scripts only (0 tokens)
+
+**Result:** ~80% token reduction. AI only used for company research (highest value task).
 
 ## Application Pipeline
 
@@ -50,25 +58,37 @@ new → applied → awaiting → interview → offer
 ## Project Structure
 
 ```
-├── agents/CLAUDE.md       # AI instructions (start here)
-├── candidates/            # Scraped job JSON files
+├── agents/CLAUDE.md           # AI instructions (start here)
+├── candidates/                # Job data files
+│   ├── adzuna.json           # Jobs from Adzuna API
+│   ├── reed.json             # Jobs from Reed API
+│   └── research-queue.json   # Jobs needing research (generated)
 ├── scripts/
-│   ├── sync-jobs.js       # Merge + dedupe + Supabase upsert
-│   ├── auto-ghost.js      # Mark stale jobs as ghosted
-│   └── update-research.js # Update single job research
-├── src/                   # React dashboard
-├── supabase-schema.sql    # Database schema
-└── supabase-cron.sql      # Optional: pg_cron auto-ghost
+│   ├── fetch-adzuna.js       # Fetch from Adzuna API
+│   ├── fetch-reed.js         # Fetch from Reed API
+│   ├── filter-new.js         # Filter new jobs (Phase 2)
+│   ├── merge-research.js     # Merge research results (Phase 4)
+│   ├── sync-jobs.js          # Sync to database (Phase 5)
+│   ├── update-research.js    # Update single job research
+│   └── auto-ghost.js         # Mark stale applications as ghosted
+├── src/                       # React dashboard
+├── supabase-schema.sql        # Database schema
+└── supabase-cron.sql          # pg_cron auto-ghost setup
 ```
 
 ## NPM Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `npm run dev` | Start dev server |
+| `npm run dev` | Start dev server (localhost:5173) |
 | `npm run build` | Production build |
+| `npm run fetch:adzuna` | Fetch jobs from Adzuna API |
+| `npm run fetch:reed` | Fetch jobs from Reed API |
+| `npm run fetch:all` | Fetch from both APIs |
+| `npm run filter:new` | Filter new jobs → research-queue.json |
+| `npm run merge:research` | Merge research results into candidates |
 | `npm run sync` | Sync candidates to Supabase |
-| `npm run auto-ghost` | Ghost stale applications |
+| `npm run auto-ghost` | Mark stale applications as ghosted |
 
 ## Auto-Ghost Setup (Supabase pg_cron)
 

@@ -17,126 +17,77 @@
 ### Architecture
 
 ```
-Phase 1: SCRAPE ──→ Phase 2: FILTER ──→ Phase 3: RESEARCH ──→ Phase 4: SYNC
-   [Haiku x5]          [Sonnet]           [Haiku xN]           [Sonnet]
-   (parallel)          (quick)            (parallel)
+Phase 1: FETCH APIs ──→ Phase 2: FILTER ──→ Phase 3: RESEARCH ──→ Phase 4: MERGE ──→ Phase 5: SYNC
+   [npm scripts]         [npm script]        [Haiku xN]           [npm script]       [npm script]
+   (sequential)          (fast O(1))         (parallel)           (fast O(1))        (upsert)
 ```
 
-**Token optimization:** Haiku handles all heavy lifting (scraping, research). Sonnet only orchestrates and filters. Do NOT use Opus for this project.
+**Data sources:** Adzuna API + Reed API provide complete job data (descriptions, skills, salary) for accurate scoring.
+**Token optimization:** Only Haiku agents for research. All other phases are scripts (ZERO tokens). Do NOT use Opus for this project.
 
 ---
 
-### Step 1: Scrape Sources (Parallel Haiku Agents)
+### Step 1: Fetch from APIs (Sequential npm scripts)
 
-**CRITICAL: Launch ALL scraper agents in a SINGLE message with multiple Task calls.**
+```bash
+# 1. Fetch from Adzuna API (UK job aggregator)
+npm run fetch:adzuna
 
-Use `model: "haiku"` and `subagent_type: "general-purpose"` for each:
+# 2. Fetch from Reed API (Pure UK jobs)
+npm run fetch:reed
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ Task 1: LinkedIn/Gmail Agent                                       │
-├────────────────────────────────────────────────────────────────────┤
-│ Search Gmail: from:linkedin subject:(job OR opportunity) newer_than:7d
-│ Extract job URLs (linkedin.com/jobs/view/XXXXX)                    │
-│ Fetch each URL, extract: title, company, location, salary, desc    │
-│ Score each job using criteria below                                │
-│ Return JSON array of jobs                                          │
-└────────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────────┐
-│ Task 2: uiuxjobsboard Agent                                        │
-├────────────────────────────────────────────────────────────────────┤
-│ Fetch: https://uiuxjobsboard.com/design-jobs/remote-united-kingdom │
-│ Extract all job listings                                           │
-│ Score each job using criteria below                                │
-│ Return JSON array of jobs                                          │
-└────────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────────┐
-│ Task 3: WorkInStartups Agent                                       │
-├────────────────────────────────────────────────────────────────────┤
-│ Fetch: https://workinstartups.com/job-board/jobs/designers         │
-│ Filter for Manchester/Remote UK only                               │
-│ Score each job using criteria below                                │
-│ Return JSON array of jobs                                          │
-└────────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────────┐
-│ Task 4: Indeed Agent (skip if 403)                                 │
-├────────────────────────────────────────────────────────────────────┤
-│ Fetch: https://uk.indeed.com/jobs?q=ux+designer&l=manchester&fromage=14
-│ Score each job using criteria below                                │
-│ Return JSON array of jobs                                          │
-└────────────────────────────────────────────────────────────────────┘
+# OR run both in one command:
+npm run fetch:all
 ```
 
-**Each agent prompt must include:**
-1. The source URL(s) to scrape
-2. The scoring criteria (copy from below)
-3. The exclusion rules (copy from below)
-4. Instructions to detect recruiters (see below)
-5. Instructions to return a JSON array
+**What these scripts do:**
+- **Adzuna**: Searches "ux designer manchester", "product designer manchester", "ux designer remote uk", "product designer remote uk"
+- **Reed**: Same searches with 30-mile radius from Manchester + Remote UK
+- **Automatic filtering**: Both scripts apply all exclusion rules and scoring
+- **Rate limiting**: Reed includes 100ms delays between detail fetches (1000/day limit)
+- **Output**: `candidates/adzuna.json` and `candidates/reed.json`
 
-**Recruiter Detection:**
-Set `type: "recruiter"` if ANY of these match:
-- Company name contains: recruitment, recruiter, talent, staffing, personnel, search, recruiting, headhunter, executive search, job board, careers platform
-- Job description contains: "our client", "on behalf of", "for our client", "client is seeking"
-- Known intermediaries: Oliver Bernard, Zebra People, Hays, Reed, Michael Page, Robert Half, Innova Recruitment, Jobgether, Huzzle, Indeed, LinkedIn (when acting as job board), etc.
-
-**Example Task call:**
-```
-Task(
-  description: "Scrape uiuxjobsboard",
-  model: "haiku",
-  subagent_type: "general-purpose",
-  prompt: "Scrape UX jobs from https://uiuxjobsboard.com/design-jobs/remote-united-kingdom
-
-  For each job extract: title, company, location, salary, description, posted date, URL
-
-  EXCLUDE if: contract/freelance, gambling company, >30 days old, not UK
-
-  DETECT RECRUITERS - Set type='recruiter' if:
-  - Company name contains: recruitment, recruiter, talent, staffing, personnel, search, recruiting, headhunter, executive search, job board, careers platform
-  - Description contains: "our client", "on behalf of", "for our client", "client is seeking"
-  - Known: Oliver Bernard, Zebra People, Hays, Reed, Michael Page, Robert Half, Innova Recruitment, Jobgether, Huzzle
-
-  SCORE (0-25):
-  - e-commerce, retail, conversion, figma: +3 each
-  - b2b, saas, design system: +2 each
-  - Senior/Lead UX: +3, Mid UX: +2
-  - Remote: +2
-  - £80k+: +3, £65-79k: +2, £50-64k: +1
-
-  Return JSON array with structure:
-  [{title, company, location, source: 'uiuxjobsboard', type: 'direct' or 'recruiter', url, remote, salary, seniority, roleType, freshness, description, suitability, postedAt}]"
-)
-```
+**Data quality:**
+✅ Full job descriptions (not email summaries)
+✅ Skills and requirements
+✅ Actual salary ranges
+✅ Posted dates for freshness checks
+✅ Company names for recruiter detection
 
 ---
 
-### Step 2: Collect & Dedupe (Sonnet)
+### Step 2: Filter New Jobs (npm script - ZERO tokens)
 
-After all scraper agents complete:
+After API fetch completes, run the filter script to identify new jobs:
 
-1. Collect JSON results from each agent
-2. **OVERWRITE** `candidates/{source}.json` (fresh data each search)
-3. Dedupe by company+title (keep highest score)
-4. **Check Supabase** for existing jobs - exclude from research/summary
-5. Filter: keep only NEW jobs with `suitability >= 15` for research
+```bash
+npm run filter:new
+```
+
+**What this script does:**
+1. Loads `candidates/adzuna.json` and `candidates/reed.json`
+2. Deduplicates across sources (keeps highest score)
+3. Queries Supabase for existing jobs
+4. Filters to only NEW jobs (not in database)
+5. Filters to jobs needing research (`suitability >= 10`, not recruiters)
+6. Outputs `candidates/research-queue.json`
+
+**Output:** Console report showing:
+- Total candidates vs new jobs
+- How many need research vs auto-sync
+- Top jobs to research
+
+**No AI tokens used** - pure data processing with O(1) lookups.
 
 ---
 
 ### Step 3: Research Companies (Parallel Haiku Agents)
 
-**Before researching, check which jobs are NEW:**
-```bash
-# Query Supabase for existing company+title combinations
-# Only research jobs that don't already exist in the database
-```
+**Input:** `candidates/research-queue.json` (from Step 2)
 
-**Launch ALL research agents in a SINGLE message.**
+**Launch ALL research agents in a SINGLE message** (use parallel Task calls).
 
-For each NEW job with `suitability >= 15` (skip recruiter placeholders):
+For each job in the research queue:
 
 ```
 Task(
@@ -151,10 +102,13 @@ Task(
      - Look for phrases like "our client", "on behalf of" in job descriptions
      - Set is_recruiter: true/false
 
-  2. Find the ACTUAL job listing URL:
+  2. Find the ACTUAL job listing URL and verify it's still active:
      - WebSearch '{company} {title} job' or '{company} careers {title}'
      - WebFetch the result to VERIFY it exists and contains the role
-     - Only return URL if you confirm the page loads and shows the job
+     - CHECK for expiration signals: "no longer accepting", "position filled",
+       "this job is closed", 404, redirect to careers homepage
+     - Set expired: true if job is no longer active
+     - Only return URL if you confirm the page loads and shows an ACTIVE job
      - Return null if you can't find a verified direct link
      - DO NOT guess URLs like 'company.com/careers' - verify or return null
 
@@ -165,23 +119,63 @@ Task(
      - High design turnover
 
   Return JSON:
-  {is_recruiter: true/false, direct_job_url: '...' or null, red_flags: [{type, severity, summary, source}]}"
+  {is_recruiter: true/false, direct_job_url: '...' or null, expired: true/false, red_flags: [{type, severity, summary, source}]}"
 )
 ```
 
 ---
 
-### Step 4: Update & Sync (Sonnet)
+### Step 4: Merge Research Results (npm script - ZERO tokens)
 
-1. For each researched job in `candidates/*.json`:
-   - Add `directJobUrl` (verified URL or null)
-   - Add `redFlags` array
-   - **UPDATE `type` to "recruiter"** if research found `is_recruiter: true`
-2. Run: `npm run sync`
+After research agents complete, collect results and merge them back:
+
+```bash
+npm run merge:research -- --results=research-results.json
+```
+
+**What this script does:**
+1. Loads research results from file (or default location)
+2. Updates `candidates/*.json` files with:
+   - `directJobUrl` (verified URL or null)
+   - `expired` (true/false)
+   - `redFlags` array
+   - `type` changed to "recruiter" if `is_recruiter: true`
+3. Saves updated candidate files
+
+**Input format** (research-results.json):
+```json
+[{
+  "id": "adzuna-acme-corp-ux-designer",
+  "company": "Acme Corp",
+  "is_recruiter": false,
+  "direct_job_url": "https://acme.com/careers/123",
+  "expired": false,
+  "red_flags": [...]
+}]
+```
+
+**No AI tokens used** - pure data merging with ID lookups.
 
 ---
 
-### Step 5: Report Summary
+### Step 5: Sync to Database (npm script - ZERO tokens)
+
+```bash
+npm run sync
+```
+
+**What this script does:**
+1. Loads all `candidates/*.json` files
+2. Filters out expired jobs (don't sync dead listings)
+3. Checks database for existing jobs
+4. Inserts only NEW jobs
+5. Marks old jobs as stale (>30 days)
+
+**No AI tokens used** - database operations only.
+
+---
+
+### Step 6: Report Summary
 
 **IMPORTANT: Only report NEW jobs that were actually synced. Do NOT include:**
 - Jobs already in the database (any status)
@@ -202,11 +196,13 @@ NEW opportunities:
 
 ## Scoring & Exclusion Rules
 
-### Exclude if ANY match:
+### HARD EXCLUDE if ANY match (do NOT include in output):
 - Not Manchester / Remote UK / Overseas-with-UK-remote
 - Contract / freelance
 - Gambling (Bet365, Flutter, Entain)
-- >30 days old
+- **Posted >30 days ago** (calculate from postedAt)
+- **Lead/Principal roles** (any discipline)
+- **Strong "UI Designer" emphasis** (title starts with "UI" or "UI/UX")
 - Senior Product Designer
 - Junior UX under £50k
 
@@ -215,7 +211,7 @@ NEW opportunities:
 |--------|--------|
 | e-commerce, retail, user research, conversion, figma | +3 each |
 | b2b, saas, prototyping, design system | +2 each |
-| Senior/Lead UX | +3 |
+| **Senior UX Designer** | +3 |
 | Mid UX | +2 |
 | Remote | +2 |
 | £80k+ | +3 |
@@ -223,6 +219,8 @@ NEW opportunities:
 | £50-64k | +1 |
 | Recruiter InMail | +3 |
 | <2 weeks old | +2 |
+| **"UX/UI" (UI secondary)** | 0 penalty |
+| **"UI/UX" or "UI Designer" focus** | -5 |
 
 ---
 
@@ -240,13 +238,14 @@ All sources use this JSON structure in `candidates/{source}.json`:
   "url": "https://...",
   "remote": false,
   "salary": "50k-65k",
-  "seniority": "mid|senior|lead|junior",
+  "seniority": "mid|senior|junior",
   "roleType": "ux|product",
   "freshness": "fresh|recent|stale",
   "description": "Brief role summary",
   "suitability": 18,
   "postedAt": "2026-01-01T00:00:00Z",
   "directJobUrl": "https://company.com/jobs/ux-designer-123",
+  "expired": false,
   "redFlags": []
 }]
 ```
@@ -269,23 +268,66 @@ All sources use this JSON structure in `candidates/{source}.json`:
 ## File Structure
 
 ```
-├── agents/CLAUDE.md      # This file - main instructions
-├── candidates/           # Scraped job data (per source)
+├── agents/CLAUDE.md           # This file - main instructions
+├── candidates/                # Job data files (JSON)
+│   ├── adzuna.json           # Jobs from Adzuna API
+│   ├── reed.json             # Jobs from Reed API
+│   └── research-queue.json   # Jobs needing research (generated)
 ├── scripts/
-│   ├── sync-jobs.js      # Merge, dedupe, insert to Supabase
-│   └── update-research.js # Update single job research
-├── src/                  # React dashboard
-└── supabase-schema.sql   # Database schema
+│   ├── fetch-adzuna.js       # Fetch from Adzuna API
+│   ├── fetch-reed.js         # Fetch from Reed API
+│   ├── filter-new.js         # Filter new jobs (Phase 2)
+│   ├── merge-research.js     # Merge research results (Phase 4)
+│   ├── sync-jobs.js          # Sync to database (Phase 5)
+│   ├── update-research.js    # Update single job research
+│   └── auto-ghost.js         # Mark stale applications as ghosted
+├── src/                       # React dashboard
+└── supabase-schema.sql        # Database schema
 ```
 
 ## NPM Scripts
 
 ```bash
-npm run dev         # Start dashboard localhost:5173
-npm run sync        # Sync candidates to Supabase
-npm run auto-ghost  # Mark stale applications as ghosted
-npm run build       # Production build
+# Development
+npm run dev              # Start dashboard localhost:5173
+npm run build            # Production build
+
+# Job Search Workflow
+npm run fetch:adzuna     # Fetch from Adzuna API
+npm run fetch:reed       # Fetch from Reed API
+npm run fetch:all        # Fetch from both APIs
+npm run filter:new       # Filter new jobs → research-queue.json
+npm run merge:research   # Merge research results into candidates
+npm run sync             # Sync candidates to Supabase
+
+# Maintenance
+npm run auto-ghost       # Mark stale applications as ghosted
+npm run update-research  # Update research for single job
+npm run reset            # Reset database (DANGER)
 ```
+
+---
+
+## Token Optimization Strategy
+
+**Problem:** Originally, Sonnet agents handled filtering and merging (Phases 2 & 4), consuming 10-20k tokens per job search.
+
+**Solution:** Replace deterministic data operations with scripts:
+- **Phase 2 (Filter):** Simple database lookups → `filter-new.js` (0 tokens)
+- **Phase 4 (Merge):** JSON field updates → `merge-research.js` (0 tokens)
+- **Phase 3 (Research):** Kept as Haiku agents (requires AI for web analysis)
+
+**Result:** ~80% token reduction per job search. Only AI usage is research (highest value activity).
+
+**Why scripts work here:**
+- Filtering: Just comparing IDs and scores (no judgment needed)
+- Merging: Copying fields from one JSON to another (deterministic)
+- Research: Requires web searches, URL verification, red flag analysis (needs AI)
+
+**Maintenance:** If you modify job schema, update:
+1. `scripts/filter-new.js` - deduplication logic
+2. `scripts/merge-research.js` - field mapping
+3. `scripts/sync-jobs.js` - database mapping
 
 ---
 

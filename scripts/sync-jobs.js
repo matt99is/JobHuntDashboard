@@ -28,7 +28,7 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed'];
+const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna', 'reed'];
 
 // Generate consistent job ID for deduplication
 function generateId(job) {
@@ -71,7 +71,7 @@ function dedupe(jobs) {
 }
 
 // Suitability threshold for company research
-const RESEARCH_THRESHOLD = 15;
+const RESEARCH_THRESHOLD = 10;
 
 // Map to database schema
 function toDbRow(job) {
@@ -177,16 +177,24 @@ async function main() {
     return !existingIds.has(j.id) && !existingKeys.has(key);
   });
 
-  console.log(`Existing: ${existing.length}, New: ${newJobs.length}\n`);
+  // Filter out expired jobs (marked during research phase)
+  const activeJobs = newJobs.filter(j => j.expired !== true);
+  const expiredCount = newJobs.length - activeJobs.length;
 
-  if (newJobs.length === 0) {
+  if (expiredCount > 0) {
+    console.log(`Filtered out ${expiredCount} expired jobs\n`);
+  }
+
+  console.log(`Existing: ${existing.length}, New: ${activeJobs.length}\n`);
+
+  if (activeJobs.length === 0) {
     console.log('No new jobs to add.\n');
     return;
   }
 
   // Sort by suitability and insert
-  newJobs.sort((a, b) => b.suitability - a.suitability);
-  const rows = newJobs.map(toDbRow);
+  activeJobs.sort((a, b) => b.suitability - a.suitability);
+  const rows = activeJobs.map(toDbRow);
 
   console.log('Inserting...');
   const { error: insertErr } = await supabase.from('jobs').insert(rows);
@@ -195,16 +203,16 @@ async function main() {
     console.error('Insert failed:', insertErr.message);
     // Write fallback
     const fallback = path.join(ROOT, 'candidates', 'failed-import.json');
-    fs.writeFileSync(fallback, JSON.stringify(newJobs, null, 2));
+    fs.writeFileSync(fallback, JSON.stringify(activeJobs, null, 2));
     console.log(`Fallback written to ${fallback}`);
     return;
   }
 
-  console.log(`\nInserted ${newJobs.length} jobs\n`);
+  console.log(`\nInserted ${activeJobs.length} jobs\n`);
 
   // Show top 5
   console.log('Top opportunities:');
-  newJobs.slice(0, 5).forEach((j, i) => {
+  activeJobs.slice(0, 5).forEach((j, i) => {
     console.log(`  ${i + 1}. ${j.title} at ${j.company} (${j.suitability})`);
   });
   console.log('');
