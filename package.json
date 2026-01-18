@@ -14,6 +14,7 @@
     "filter:new": "node scripts/filter-new.js",
     "merge:research": "node scripts/merge-research.js",
     "sync": "node scripts/sync-jobs.js",
+    "cleanup:locations": "node scripts/cleanup-locations.js",
     "reset": "node scripts/reset-db.js",
     "update-research": "node scripts/update-research.js",
     "auto-ghost": "node scripts/auto-ghost.js"
