@@ -197,14 +197,24 @@ NEW opportunities:
 ## Scoring & Exclusion Rules
 
 ### HARD EXCLUDE if ANY match (do NOT include in output):
-- Not Manchester / Remote UK / Overseas-with-UK-remote
-- Contract / freelance
+
+**Location (STRICT):**
+- ❌ London, Sheffield, Wales, Birmingham, Bristol (or ANY non-Manchester UK city)
+- ❌ Overseas remote (not UK)
+- ✅ ONLY allow: Manchester area (Greater Manchester, Salford, Stockport, Bolton, Oldham, Rochdale, Bury, Wigan, Trafford) OR Remote UK
+
+**Other exclusions:**
+- Contract / freelance / part-time
 - Gambling (Bet365, Flutter, Entain)
-- **Posted >30 days ago** (calculate from postedAt)
+- **Posted >14 days ago** (stale, not fresh enough)
 - **Lead/Principal roles** (any discipline)
 - **Strong "UI Designer" emphasis** (title starts with "UI" or "UI/UX")
 - Senior Product Designer
 - Junior UX under £50k
+- Engineering/developer roles
+- Product managers
+- Physical product design (CAD, mechanical)
+- Service/digital/content designer
 
 ### Scoring (0-25):
 | Factor | Points |

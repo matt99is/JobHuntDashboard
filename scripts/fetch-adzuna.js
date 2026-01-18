@@ -71,6 +71,31 @@ function shouldExclude(job, description) {
   const title = job.title.toLowerCase();
   const descLower = description.toLowerCase();
   const age = daysSince(job.created);
+  const location = job.location.display_name.toLowerCase();
+
+  // === STRICT LOCATION FILTERING ===
+  // ONLY allow: Manchester area OR explicitly remote jobs
+  const isManchester = location.includes('manchester') ||
+                       location.includes('salford') ||
+                       location.includes('stockport') ||
+                       location.includes('bolton') ||
+                       location.includes('oldham') ||
+                       location.includes('rochdale') ||
+                       location.includes('bury') ||
+                       location.includes('wigan') ||
+                       location.includes('trafford');
+
+  const isRemote = job.location.area && job.location.area.includes('Remote');
+
+  // Exclude if NOT Manchester area AND NOT remote
+  if (!isManchester && !isRemote) {
+    return 'wrong-location';
+  }
+
+  // If remote, verify it's UK remote (not overseas)
+  if (isRemote && location.includes('overseas')) {
+    return 'overseas-remote';
+  }
 
   // Exclude if >14 days old (stale)
   if (age > 14) return 'stale';
