@@ -6,6 +6,7 @@ import FilterBar, { FilterType } from './components/FilterBar';
 import JobList from './components/JobList';
 import ImportModal from './components/ImportModal';
 import AddJobModal from './components/AddJobModal';
+import Footer from './components/Footer';
 
 export default function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -149,6 +150,8 @@ export default function App() {
         onClose={() => setIsAddModalOpen(false)}
         onAddComplete={handleImportComplete}
       />
+
+      <Footer />
     </div>
   );
 }

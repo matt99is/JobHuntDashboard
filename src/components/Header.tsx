@@ -17,7 +17,7 @@ export default function Header({ jobs, onAddClick, onImportClick }: HeaderProps)
     <header className="border-b border-[#D4D4D4] bg-[#F5F5F5]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-3xl font-bold text-[#1A1A1A]">Job Hunt</h1>
+          <h1 className="text-3xl font-bold text-[#1A1A1A]">Job Hunt Assistant</h1>
           <div className="flex gap-3">
             <button
               onClick={onImportClick}
