@@ -42,7 +42,7 @@ function generateId(job) {
 // Calculate job age in days
 function daysSince(dateString) {
   const posted = new Date(dateString);
-  const now = new Date('2026-01-17');
+  const now = new Date();
   return Math.floor((now - posted) / (1000 * 60 * 60 * 24));
 }
 

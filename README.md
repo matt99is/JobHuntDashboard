@@ -1,125 +1,75 @@
 # Job Hunt Dashboard
 
-Personal job tracking dashboard for UX/Product Designer roles. Automates job discovery, tracks applications through the pipeline, and auto-detects ghosting.
+Job tracking dashboard with:
+- Netlify frontend
+- Local PostgreSQL database (on your Ubuntu server)
+- Local API (`server/index.js`)
+- Weekly AI pipeline (Monday 07:00 UTC)
 
-**Live:** [jobs.mattlelonek.co.uk](https://jobs.mattlelonek.co.uk)
+## Current Architecture
 
-## Features
+1. Frontend calls `VITE_API_BASE_URL`.
+2. API reads/writes local PostgreSQL.
+3. Weekly scheduler runs `scripts/run-ai-pipeline.js`.
+4. Pipeline flow:
+   - `fetch-adzuna.js`
+   - `gather-with-claude.js` (email + web intake)
+   - `filter-new.js` (dedupe + cutoff)
+   - `research-with-claude.js`
+   - `merge-research.js`
+   - `sync-jobs.js`
 
-- **Automated Job Search** - Fetches from Adzuna API + Reed API (complete job data)
-- **Smart Scoring** - Ranks jobs 0-25 based on your criteria (scoring built into API scripts)
-- **Token Optimized** - 80% reduction via scripts for filtering/merging (AI only for research)
-- **Company Research** - AI agents find red flags (layoffs, Glassdoor ratings, financial issues)
-- **Application Tracking** - Pipeline: `new` → `awaiting` → `interview` → `offer/rejected/ghosted`
-- **Auto-Ghost Detection** - Marks applications as ghosted after 30 days (Supabase pg_cron)
-- **Recruiter Detection** - Automatic detection in API scripts + AI verification
+Score policy:
+- `< 12` is dropped
+- `>= 12` is researched and eligible for dashboard sync
 
 ## Quick Start
 
 ```bash
 npm install
-cp .env.example .env.local  # Add Supabase credentials
-npm run dev                  # Dashboard at localhost:5173
+cp .env.example .env.local
+npm run db:init
+npm run server
 ```
 
-## Using with Claude Code
+In another terminal:
 
-All AI instructions are in [`agents/CLAUDE.md`](agents/CLAUDE.md).
-
-| Say this | What happens |
-|----------|--------------|
-| "run job search" | Full workflow: fetch → filter → research → merge → sync |
-| "sync jobs" | Sync candidates/*.json to database |
-| "run auto-ghost" | Mark stale applications as ghosted |
-
-**Token optimization:**
-- Phase 1 (Fetch): Scripts only (0 tokens)
-- Phase 2 (Filter): Scripts only (0 tokens)
-- Phase 3 (Research): Haiku agents (only AI usage)
-- Phase 4 (Merge): Scripts only (0 tokens)
-- Phase 5 (Sync): Scripts only (0 tokens)
-
-**Result:** ~80% token reduction. AI only used for company research (highest value task).
-
-## Application Pipeline
-
-```
-new → applied → awaiting → interview → offer
-                    ↓           ↓
-                 ghosted    rejected
+```bash
+npm run dev
 ```
 
-- **New**: Fresh from job search, not yet applied
-- **Awaiting**: Applied, waiting for response
-- **Interview**: Got a response, interviewing
-- **Offer/Rejected**: Final outcomes
-- **Ghosted**: No response after 30 days (auto-set)
+## Core Commands
 
-## Project Structure
+- `npm run server` - start local API
+- `npm run db:init` - apply local DB schema
+- `npm run pipeline:run` - run full pipeline now
+- `npm run fetch:all` - run deterministic source fetches
+- `npm run filter:new` - build research queue
+- `npm run merge:research -- --results=candidates/research-results.json`
+- `npm run sync` - sync candidates into local DB
 
-```
-├── agents/CLAUDE.md           # AI instructions (start here)
-├── candidates/                # Job data files
-│   ├── adzuna.json           # Jobs from Adzuna API
-│   ├── reed.json             # Jobs from Reed API
-│   └── research-queue.json   # Jobs needing research (generated)
-├── scripts/
-│   ├── fetch-adzuna.js       # Fetch from Adzuna API
-│   ├── fetch-reed.js         # Fetch from Reed API
-│   ├── filter-new.js         # Filter new jobs (Phase 2)
-│   ├── merge-research.js     # Merge research results (Phase 4)
-│   ├── sync-jobs.js          # Sync to database (Phase 5)
-│   ├── update-research.js    # Update single job research
-│   └── auto-ghost.js         # Mark stale applications as ghosted
-├── src/                       # React dashboard
-├── supabase-schema.sql        # Database schema
-└── supabase-cron.sql          # pg_cron auto-ghost setup
-```
+## Required Environment Variables
 
-## NPM Scripts
+Minimum:
+- `VITE_API_BASE_URL`
+- `DATABASE_URL` (or `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`)
+- `ADZUNA_APP_ID`
+- `ADZUNA_APP_KEY`
 
-| Script | Purpose |
-|--------|---------|
-| `npm run dev` | Start dev server (localhost:5173) |
-| `npm run build` | Production build |
-| `npm run fetch:adzuna` | Fetch jobs from Adzuna API |
-| `npm run fetch:reed` | Fetch jobs from Reed API |
-| `npm run fetch:all` | Fetch from both APIs |
-| `npm run filter:new` | Filter new jobs → research-queue.json |
-| `npm run merge:research` | Merge research results into candidates |
-| `npm run sync` | Sync candidates to Supabase |
-| `npm run auto-ghost` | Mark stale applications as ghosted |
+Optional:
+- `SYSTEM_NOTIFY_SCRIPT`
+- `SYSTEM_NOTIFY_PROJECT`
+- `CLAUDE_GATHER_ALLOWED_TOOLS` (only if Gmail MCP tool names differ)
 
-## Auto-Ghost Setup (Supabase pg_cron)
+## Operations
 
-Uses native Supabase scheduled function. Runs daily at 2 AM UTC.
+- Weekly timer/service files: `ops/systemd/`
+- Scheduler entrypoint: `ops/run-pipeline.sh`
+- Setup scripts: `ops/setup/`
 
-**To enable:**
-1. Go to Supabase Dashboard → Database → Extensions
-2. Enable `pg_cron` extension
-3. Go to SQL Editor → New Query
-4. Run the SQL from `supabase-cron.sql`
-5. Verify with: `SELECT * FROM cron.job;`
+## Docs
 
-## Tech Stack
+- Setup and server provisioning: `docs/SERVER-SETUP.md`
+- Automation behavior and failure handling: `docs/LOCAL-AUTOMATION-GUIDE.md`
+- Developer-oriented architecture notes: `docs/DEVELOPER-GUIDE.md`
 
-- **Frontend:** React 18, TypeScript, Tailwind CSS, Vite
-- **Backend:** Supabase (PostgreSQL)
-- **Hosting:** Netlify
-- **AI Search:** Claude Code with Haiku/Sonnet
-
-## Database Migration
-
-If setting up fresh or updating, run this in Supabase SQL Editor:
-
-```sql
--- See supabase-schema.sql for full schema
--- For existing databases, run the migration comments at the bottom
-```
-
-## Search Criteria
-
-- **Location:** Manchester, Remote UK
-- **Type:** Permanent only (no contract/freelance)
-- **Exclude:** Gambling, Senior PD, Junior UX <£50k, >30 days old
-- **Scoring:** e-commerce +3, b2b/saas +2, Senior UX +3, Remote +2

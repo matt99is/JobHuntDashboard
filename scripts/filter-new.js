@@ -10,8 +10,7 @@
  *
  * INPUTS:
  *   - candidates/adzuna.json (from fetch-adzuna.js)
- *   - candidates/reed.json (from fetch-reed.js)
- *   - Supabase jobs table (to check existing jobs)
+ *   - Local PostgreSQL jobs table (to check existing jobs)
  *
  * OUTPUTS:
  *   - candidates/research-queue.json (jobs needing company research)
@@ -19,14 +18,14 @@
  *
  * CRITERIA FOR RESEARCH:
  *   1. Job is NEW (not in database by ID or company+title match)
- *   2. Suitability score >= 15 (configurable threshold)
+ *   2. Suitability score >= cutoff (default 12, configurable)
  *   3. Not marked as recruiter placeholder (type !== 'recruiter')
  *
  * USAGE:
  *   npm run filter:new
  *
  * REQUIRES:
- *   - VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local
+ *   - DATABASE_URL or DB_* values in .env.local
  *
  * MAINTENANCE NOTES:
  *   - If you add new candidate sources, add them to SOURCES array
@@ -40,35 +39,18 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
+import { query } from '../lib/db.js';
 
 // === CONFIGURATION ===
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-// Load environment variables from .env.local
-dotenv.config({ path: path.join(ROOT, '.env.local') });
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-// Exit early if credentials missing
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env.local');
-  process.exit(1);
-}
-
-// Initialize Supabase client
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
 // Candidate sources to check (must match filenames in candidates/ directory)
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna', 'reed'];
+const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
 
-// Minimum suitability score to trigger company research
-// Jobs below this threshold will be synced but not researched
-const RESEARCH_THRESHOLD = 10;
+// Minimum suitability score to trigger company research.
+const RESEARCH_THRESHOLD = Number(process.env.JOB_SCORE_CUTOFF || 12);
 
 // === HELPER FUNCTIONS ===
 
@@ -153,24 +135,17 @@ function dedupe(jobs) {
 }
 
 /**
- * Fetch existing jobs from Supabase
+ * Fetch existing jobs from local database
  *
  * We only need ID, company, and title to check for duplicates.
  * This is much more efficient than fetching all columns.
  *
  * @returns {Promise<Array>} - Existing jobs from database
- * @throws {Error} - If Supabase query fails
+ * @throws {Error} - If database query fails
  */
 async function fetchExistingJobs() {
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('id, title, company');
-
-  if (error) {
-    throw new Error(`Supabase query failed: ${error.message}`);
-  }
-
-  return data || [];
+  const { rows } = await query('SELECT id, title, company FROM jobs');
+  return rows || [];
 }
 
 /**

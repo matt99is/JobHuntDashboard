@@ -1,44 +1,23 @@
 /**
- * Reset database - wipe all jobs and ensure schema is up to date
+ * Reset database - wipe all jobs in local PostgreSQL
  * Usage: npm run reset
  */
 
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '..', '.env.local') });
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
-);
+import { query } from '../lib/db.js';
 
 async function main() {
   console.log('\n=== DATABASE RESET ===\n');
 
-  // Delete all jobs
   console.log('Deleting all jobs...');
-  const { error: deleteErr } = await supabase
-    .from('jobs')
-    .delete()
-    .neq('id', '');  // Delete all rows
+  await query('DELETE FROM jobs');
 
-  if (deleteErr) {
-    console.error('Delete failed:', deleteErr.message);
-    return;
-  }
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM jobs');
+  const count = rows[0]?.count || 0;
 
-  // Verify empty
-  const { count } = await supabase
-    .from('jobs')
-    .select('*', { count: 'exact', head: true });
-
-  console.log(`Done. Jobs remaining: ${count || 0}\n`);
-  console.log('Note: Run this SQL in Supabase dashboard to add posted_at column:');
-  console.log('  ALTER TABLE jobs ADD COLUMN IF NOT EXISTS posted_at timestamp with time zone;\n');
+  console.log(`Done. Jobs remaining: ${count}\n`);
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error('Reset failed:', error.message);
+  process.exit(1);
+});

@@ -1,0 +1,9 @@
+[Unit]
+Description=Job Hunt Dashboard weekly AI pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/matt99is/projects/JobHuntDashboard
+ExecStart=/home/matt99is/projects/JobHuntDashboard/ops/run-pipeline.sh

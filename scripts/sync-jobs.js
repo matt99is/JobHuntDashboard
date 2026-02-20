@@ -1,34 +1,20 @@
 /**
- * Job Search - Sync to Supabase
+ * Job Search - Sync to Local PostgreSQL
  *
  * Merges candidate files from agents, deduplicates, and inserts new jobs.
  *
  * Usage: npm run sync
- * Requires: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local
+ * Requires: DATABASE_URL or DB_* values in .env.local
  */
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
+import { query } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-
-// Load environment variables
-dotenv.config({ path: path.join(ROOT, '.env.local') });
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env.local');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna', 'reed'];
+const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
 
 // Generate consistent job ID for deduplication
 function generateId(job) {
@@ -70,8 +56,8 @@ function dedupe(jobs) {
   return Array.from(seen.values());
 }
 
-// Suitability threshold for company research
-const RESEARCH_THRESHOLD = 10;
+// Global suitability cutoff (scores below this are never synced to dashboard).
+const SCORE_CUTOFF = Number(process.env.JOB_SCORE_CUTOFF || 12);
 
 // Map to database schema
 function toDbRow(job) {
@@ -101,7 +87,7 @@ function toDbRow(job) {
     // directJobUrl = verified link to actual job listing (not guessed careers page)
     career_page_url: directUrl,
     red_flags: job.redFlags || [],
-    research_status: hasResearch ? 'complete' : (suitability >= RESEARCH_THRESHOLD ? 'pending' : 'skipped'),
+    research_status: hasResearch ? 'complete' : (suitability >= SCORE_CUTOFF ? 'pending' : 'skipped'),
     researched_at: hasResearch ? new Date().toISOString() : null,
   };
 }
@@ -112,27 +98,41 @@ async function deprecateOldJobs() {
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const cutoff = thirtyDaysAgo.toISOString();
 
-  // Jobs with posted_at older than 30 days
-  const { data: postedOld, error: err1 } = await supabase
-    .from('jobs')
-    .update({ freshness: 'stale' })
-    .lt('posted_at', cutoff)
-    .neq('freshness', 'stale')
-    .select('id');
+  let postedCount = 0;
+  let createdCount = 0;
 
-  // Jobs without posted_at, using created_at as fallback
-  const { data: createdOld, error: err2 } = await supabase
-    .from('jobs')
-    .update({ freshness: 'stale' })
-    .is('posted_at', null)
-    .lt('created_at', cutoff)
-    .neq('freshness', 'stale')
-    .select('id');
+  try {
+    const postedResult = await query(
+      `
+      UPDATE jobs
+      SET freshness = 'stale'
+      WHERE posted_at < $1
+        AND freshness IS DISTINCT FROM 'stale'
+      `,
+      [cutoff]
+    );
+    postedCount = postedResult.rowCount || 0;
+  } catch (error) {
+    console.error('Deprecate (posted_at) failed:', error.message);
+  }
 
-  if (err1) console.error('Deprecate (posted_at) failed:', err1.message);
-  if (err2) console.error('Deprecate (created_at) failed:', err2.message);
+  try {
+    const createdResult = await query(
+      `
+      UPDATE jobs
+      SET freshness = 'stale'
+      WHERE posted_at IS NULL
+        AND created_at < $1
+        AND freshness IS DISTINCT FROM 'stale'
+      `,
+      [cutoff]
+    );
+    createdCount = createdResult.rowCount || 0;
+  } catch (error) {
+    console.error('Deprecate (created_at) failed:', error.message);
+  }
 
-  return (postedOld?.length || 0) + (createdOld?.length || 0);
+  return postedCount + createdCount;
 }
 
 async function main() {
@@ -159,12 +159,14 @@ async function main() {
   const unique = dedupe(all);
   console.log(`After dedupe: ${unique.length} (removed ${all.length - unique.length})\n`);
 
-  // Fetch existing from Supabase
+  // Fetch existing from local database
   console.log('Checking existing jobs...');
-  const { data: existing, error: fetchErr } = await supabase.from('jobs').select('id, title, company');
-
-  if (fetchErr) {
-    console.error('Failed to fetch existing jobs:', fetchErr.message);
+  let existing = [];
+  try {
+    const existingResult = await query('SELECT id, title, company FROM jobs');
+    existing = existingResult.rows;
+  } catch (error) {
+    console.error('Failed to fetch existing jobs:', error.message);
     return;
   }
 
@@ -178,41 +180,88 @@ async function main() {
   });
 
   // Filter out expired jobs (marked during research phase)
-  const activeJobs = newJobs.filter(j => j.expired !== true);
+  const activeJobs = newJobs.filter((j) => j.expired !== true);
   const expiredCount = newJobs.length - activeJobs.length;
 
   if (expiredCount > 0) {
     console.log(`Filtered out ${expiredCount} expired jobs\n`);
   }
 
-  console.log(`Existing: ${existing.length}, New: ${activeJobs.length}\n`);
+  // Enforce minimum suitability cutoff before insertion.
+  const cutoffJobs = activeJobs.filter((j) => Number(j.suitability || 0) >= SCORE_CUTOFF);
+  const droppedLowScore = activeJobs.length - cutoffJobs.length;
 
-  if (activeJobs.length === 0) {
+  if (droppedLowScore > 0) {
+    console.log(`Filtered out ${droppedLowScore} jobs below score cutoff (${SCORE_CUTOFF})\n`);
+  }
+
+  console.log(`Existing: ${existing.length}, New: ${cutoffJobs.length}\n`);
+
+  if (cutoffJobs.length === 0) {
     console.log('No new jobs to add.\n');
     return;
   }
 
   // Sort by suitability and insert
-  activeJobs.sort((a, b) => b.suitability - a.suitability);
-  const rows = activeJobs.map(toDbRow);
+  cutoffJobs.sort((a, b) => b.suitability - a.suitability);
+  const rows = cutoffJobs.map(toDbRow);
 
   console.log('Inserting...');
-  const { error: insertErr } = await supabase.from('jobs').insert(rows);
+  let inserted = 0;
 
-  if (insertErr) {
-    console.error('Insert failed:', insertErr.message);
-    // Write fallback
+  try {
+    for (const row of rows) {
+      const result = await query(
+        `
+        INSERT INTO jobs (
+          id, title, company, location, url, salary, remote, seniority, role_type,
+          application_type, freshness, description, source, status, suitability,
+          posted_at, career_page_url, red_flags, research_status, researched_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9,
+          $10, $11, $12, $13, $14, $15,
+          $16, $17, $18, $19, $20
+        )
+        ON CONFLICT (id) DO NOTHING
+        `,
+        [
+          row.id,
+          row.title,
+          row.company,
+          row.location,
+          row.url,
+          row.salary,
+          row.remote,
+          row.seniority,
+          row.role_type,
+          row.application_type,
+          row.freshness,
+          row.description,
+          row.source,
+          row.status,
+          row.suitability,
+          row.posted_at,
+          row.career_page_url,
+          JSON.stringify(row.red_flags || []),
+          row.research_status,
+          row.researched_at,
+        ]
+      );
+      inserted += result.rowCount || 0;
+    }
+  } catch (error) {
+    console.error('Insert failed:', error.message);
     const fallback = path.join(ROOT, 'candidates', 'failed-import.json');
-    fs.writeFileSync(fallback, JSON.stringify(activeJobs, null, 2));
+    fs.writeFileSync(fallback, JSON.stringify(cutoffJobs, null, 2));
     console.log(`Fallback written to ${fallback}`);
     return;
   }
 
-  console.log(`\nInserted ${activeJobs.length} jobs\n`);
+  console.log(`\nInserted ${inserted} jobs\n`);
 
   // Show top 5
   console.log('Top opportunities:');
-  activeJobs.slice(0, 5).forEach((j, i) => {
+  cutoffJobs.slice(0, 5).forEach((j, i) => {
     console.log(`  ${i + 1}. ${j.title} at ${j.company} (${j.suitability})`);
   });
   console.log('');

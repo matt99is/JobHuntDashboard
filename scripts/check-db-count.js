@@ -1,28 +1,26 @@
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { query } from '../lib/db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
+async function main() {
+  const countResult = await query('SELECT COUNT(*)::int AS count FROM jobs');
+  const total = countResult.rows[0]?.count || 0;
 
-dotenv.config({ path: path.join(ROOT, '.env.local') });
+  const dataResult = await query(
+    `
+    SELECT title, company, location
+    FROM jobs
+    ORDER BY created_at DESC
+    LIMIT 200
+    `
+  );
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-const { data, error, count } = await supabase
-  .from('jobs')
-  .select('*', { count: 'exact' });
-
-if (error) {
-  console.error('Error:', error);
-} else {
-  console.log('Total jobs:', count);
+  console.log('Total jobs:', total);
   console.log('Jobs:');
-  data.forEach(job => {
+  dataResult.rows.forEach((job) => {
     console.log(`- ${job.title} at ${job.company} (${job.location})`);
   });
 }
+
+main().catch((error) => {
+  console.error('Error:', error.message);
+  process.exit(1);
+});

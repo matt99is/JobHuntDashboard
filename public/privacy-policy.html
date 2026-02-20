@@ -53,7 +53,7 @@
 </head>
 <body>
     <h1>Privacy Policy</h1>
-    <p class="last-updated">Last Updated: January 24, 2026</p>
+    <p class="last-updated">Last Updated: February 19, 2026</p>
 
     <div class="highlight">
         <strong>Privacy First:</strong> Job Hunt Dashboard is a personal productivity tool. Your data stays with you.
@@ -125,7 +125,7 @@
 
     <h3>3.1 Where Your Data is Stored</h3>
     <ul>
-        <li><strong>Supabase (PostgreSQL):</strong> Job listings, application tracking data, your notes</li>
+        <li><strong>Self-hosted PostgreSQL:</strong> Job listings, application tracking data, and notes on your own server</li>
         <li><strong>Your Browser:</strong> OAuth tokens for Gmail access (stored in browser local storage)</li>
         <li><strong>Not Stored:</strong> Full email content, email attachments, personal emails</li>
     </ul>
@@ -141,7 +141,7 @@
     <ul>
         <li>All data transmission uses HTTPS encryption</li>
         <li>Gmail access uses OAuth 2.0 (secure authorization standard)</li>
-        <li>Database access protected by Row-Level Security (RLS)</li>
+        <li>Database access is restricted to your server-side API and local admin access</li>
         <li>No passwords stored (authentication via OAuth)</li>
         <li>Application hosted on secure infrastructure (Netlify)</li>
     </ul>
@@ -162,16 +162,11 @@
             See <a href="https://policies.google.com/privacy" target="_blank">Google's Privacy Policy</a>
         </li>
         <li>
-            <strong>Supabase:</strong> For database hosting.
-            See <a href="https://supabase.com/privacy" target="_blank">Supabase Privacy Policy</a>
-        </li>
-        <li>
             <strong>Netlify:</strong> For application hosting.
             See <a href="https://www.netlify.com/privacy/" target="_blank">Netlify Privacy Policy</a>
         </li>
         <li>
-            <strong>Job Board APIs:</strong> Adzuna, Jooble, Careerjet, RemoteOK, Jobicy, We Work Remotely, 4dayweek.io,
-            Authentic Jobs (publicly accessible APIs, no personal data shared)
+            <strong>Job Board APIs/Sources:</strong> Adzuna and publicly available job listing pages used for intake
         </li>
     </ul>
 
@@ -230,8 +225,8 @@
 
     <h2>8. International Data Transfers</h2>
     <p>
-        Your data may be stored and processed in the European Union (Supabase EU region) and the United States
-        (Netlify hosting). By using the Application, you consent to the transfer of your information to these locations.
+        Your data may be stored on your own server and through Netlify hosting infrastructure. By using the Application,
+        you consent to processing in the locations where those systems operate.
     </p>
 
     <h2>9. Changes to This Privacy Policy</h2>

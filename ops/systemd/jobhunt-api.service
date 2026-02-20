@@ -1,0 +1,15 @@
+[Unit]
+Description=Job Hunt Dashboard local API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/matt99is/projects/JobHuntDashboard
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/env npm run server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

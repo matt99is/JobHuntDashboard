@@ -11,7 +11,6 @@
  * INPUTS:
  *   - candidates/research-queue.json (jobs that were researched)
  *   - candidates/adzuna.json (original candidate data)
- *   - candidates/reed.json (original candidate data)
  *   - Research results from AI agents (passed as JSON string or file)
  *
  * OUTPUTS:
@@ -27,8 +26,8 @@
  *   # Option 1: Pass research results as file
  *   npm run merge:research -- --results=research-results.json
  *
- *   # Option 2: Provide results via stdin (for piping from agents)
- *   echo '[{...}]' | npm run merge:research
+ *   # Option 2: Use default file location
+ *   npm run merge:research
  *
  * RESEARCH RESULT FORMAT (from Haiku agents):
  *   [{
@@ -50,7 +49,7 @@
  * MAINTENANCE NOTES:
  *   - If you add new candidate sources, add them to SOURCES array
  *   - The ID matching must be exact (uses same generateId as other scripts)
- *   - Red flag types should match the schema in supabase-schema.sql
+ *   - Red flag types should match the schema in database/schema.sql
  *
  * @author Job Hunt Dashboard
  * @since 2026-01-18 (Token optimization update)
@@ -66,7 +65,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 // Candidate sources to update (must match filenames in candidates/ directory)
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna', 'reed'];
+const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
 
 // === HELPER FUNCTIONS ===
 
@@ -88,7 +87,7 @@ function parseArgs() {
       console.log(`
 Usage:
   npm run merge:research -- --results=research-results.json
-  echo '[{...}]' | npm run merge:research
+  npm run merge:research
 
 Options:
   --results=FILE    Load research results from JSON file
@@ -110,8 +109,7 @@ Options:
  *
  * Tries multiple sources in order:
  *   1. --results=file.json argument
- *   2. Standard input (for piping)
- *   3. Default location (candidates/research-results.json)
+ *   2. Default location (candidates/research-results.json)
  *
  * @param {Object} args - Parsed command line arguments
  * @returns {Promise<Array>} - Array of research result objects
@@ -133,12 +131,7 @@ async function loadResearchResults(args) {
     return Array.isArray(data) ? data : [data];
   }
 
-  // Option 2: Read from stdin (for piping)
-  // TODO: [MISSING] Implement stdin reading for piped research results
-  // This would allow: echo '[{...}]' | npm run merge:research
-  // For now, we require --results=file.json
-
-  // Option 3: Check default location
+  // Option 2: Check default location
   const defaultPath = path.join(ROOT, 'candidates', 'research-results.json');
   if (fs.existsSync(defaultPath)) {
     console.log(`Loading research from default location: ${defaultPath}`);
@@ -154,7 +147,7 @@ async function loadResearchResults(args) {
 /**
  * Load candidate file for a specific source
  *
- * @param {string} source - Source name (e.g., 'adzuna', 'reed')
+ * @param {string} source - Source name (e.g., 'adzuna')
  * @returns {Array|null} - Array of jobs or null if file doesn't exist
  */
 function loadCandidateFile(source) {
@@ -175,7 +168,7 @@ function loadCandidateFile(source) {
 /**
  * Save candidate file for a specific source
  *
- * @param {string} source - Source name (e.g., 'adzuna', 'reed')
+ * @param {string} source - Source name (e.g., 'adzuna')
  * @param {Array} jobs - Array of jobs to save
  */
 function saveCandidateFile(source, jobs) {

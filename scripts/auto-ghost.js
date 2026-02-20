@@ -11,25 +11,8 @@
  *   npm run auto-ghost  (if you add to package.json)
  */
 
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { query } from '../lib/db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
-
-dotenv.config({ path: path.join(ROOT, '.env.local') });
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env.local');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const GHOST_THRESHOLD_DAYS = 30;
 
 async function autoGhost() {
@@ -39,14 +22,20 @@ async function autoGhost() {
   console.log(`Looking for jobs applied before: ${cutoffDate.toISOString().split('T')[0]}`);
 
   // Find jobs to ghost
-  const { data: jobsToGhost, error: selectError } = await supabase
-    .from('jobs')
-    .select('id, company, title, applied_at')
-    .eq('status', 'awaiting')
-    .lt('applied_at', cutoffDate.toISOString());
-
-  if (selectError) {
-    console.error('❌ Error finding jobs:', selectError.message);
+  let jobsToGhost = [];
+  try {
+    const result = await query(
+      `
+      SELECT id, company, title, applied_at
+      FROM jobs
+      WHERE status = 'awaiting'
+        AND applied_at < $1
+      `,
+      [cutoffDate.toISOString()]
+    );
+    jobsToGhost = result.rows;
+  } catch (error) {
+    console.error('❌ Error finding jobs:', error.message);
     process.exit(1);
   }
 
@@ -63,17 +52,26 @@ async function autoGhost() {
   });
 
   // Update to ghosted
-  const { data: updated, error: updateError } = await supabase
-    .from('jobs')
-    .update({
-      status: 'ghosted',
-      outcome_notes: `Auto-ghosted after ${GHOST_THRESHOLD_DAYS} days no response`
-    })
-    .in('id', jobsToGhost.map(j => j.id))
-    .select('id, company, title');
-
-  if (updateError) {
-    console.error('❌ Error updating jobs:', updateError.message);
+  let updated = [];
+  try {
+    const result = await query(
+      `
+      UPDATE jobs
+      SET
+        status = 'ghosted',
+        outcome_at = now(),
+        outcome_notes = $1
+      WHERE id = ANY($2::text[])
+      RETURNING id, company, title
+      `,
+      [
+        `Auto-ghosted after ${GHOST_THRESHOLD_DAYS} days no response`,
+        jobsToGhost.map((job) => job.id),
+      ]
+    );
+    updated = result.rows;
+  } catch (error) {
+    console.error('❌ Error updating jobs:', error.message);
     process.exit(1);
   }
 

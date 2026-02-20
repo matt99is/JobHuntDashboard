@@ -1,7 +1,7 @@
 /**
  * Update Research - Helper script for Claude Code
  *
- * Updates a job's research fields in Supabase.
+ * Updates a job's research fields in local PostgreSQL.
  *
  * Usage: node scripts/update-research.js <job-id> <json-data>
  *
@@ -9,26 +9,10 @@
  *   node scripts/update-research.js "linkedin-acme-ux-designer" '{"career_page_url":"https://acme.com/careers","red_flags":[],"research_status":"complete"}'
  */
 
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '..', '.env.local') });
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env.local');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import { query } from '../lib/db.js';
 
 async function main() {
-  const [,, jobId, jsonData] = process.argv;
+  const [, , jobId, jsonData] = process.argv;
 
   if (!jobId || !jsonData) {
     console.error('Usage: node scripts/update-research.js <job-id> <json-data>');
@@ -41,19 +25,17 @@ async function main() {
   let data;
   try {
     data = JSON.parse(jsonData);
-  } catch (e) {
-    console.error('Invalid JSON:', e.message);
+  } catch (error) {
+    console.error('Invalid JSON:', error.message);
     process.exit(1);
   }
 
-  // Validate research_status if provided
   const validStatuses = ['pending', 'researching', 'complete', 'skipped', 'failed'];
   if (data.research_status && !validStatuses.includes(data.research_status)) {
     console.error(`Invalid research_status. Must be one of: ${validStatuses.join(', ')}`);
     process.exit(1);
   }
 
-  // Build update object with only allowed fields
   const update = {};
   if (data.career_page_url !== undefined) update.career_page_url = data.career_page_url;
   if (data.red_flags !== undefined) update.red_flags = data.red_flags;
@@ -65,20 +47,30 @@ async function main() {
     process.exit(1);
   }
 
+  const fields = Object.keys(update);
+  const assignments = fields.map((field, i) => `${field} = $${i + 1}`).join(', ');
+  const values = fields.map((field) =>
+    field === 'red_flags' ? JSON.stringify(update[field]) : update[field]
+  );
+  values.push(jobId);
+
   console.log(`Updating job: ${jobId}`);
   console.log('Data:', JSON.stringify(update, null, 2));
 
-  const { error } = await supabase
-    .from('jobs')
-    .update(update)
-    .eq('id', jobId);
+  const result = await query(
+    `UPDATE jobs SET ${assignments} WHERE id = $${values.length}`,
+    values
+  );
 
-  if (error) {
-    console.error('Update failed:', error.message);
+  if ((result.rowCount || 0) === 0) {
+    console.error('Update failed: job not found');
     process.exit(1);
   }
 
   console.log('Updated successfully');
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error('Update failed:', error.message);
+  process.exit(1);
+});

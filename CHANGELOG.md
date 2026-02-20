@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-02-19
+
+### Added
+
+- Local PostgreSQL schema at `database/schema.sql` with trigger + auto-ghost function
+- Local API server at `server/index.js` for frontend CRUD operations
+- Shared PostgreSQL connection module at `lib/db.js`
+- Weekly AI orchestrator `scripts/run-ai-pipeline.js`
+- Claude gather/research automation scripts:
+  - `scripts/gather-with-claude.js`
+  - `scripts/research-with-claude.js`
+- Scheduler assets:
+  - `ops/run-pipeline.sh`
+  - `ops/cron.example`
+  - `ops/systemd/jobhunt-pipeline.service`
+  - `ops/systemd/jobhunt-pipeline.timer`
+- Local automation guide at `docs/LOCAL-AUTOMATION-GUIDE.md`
+
+### Changed
+
+- Frontend data layer now targets local API (`VITE_API_BASE_URL`) instead of direct Supabase client calls
+- Pipeline research cutoff increased to `12` (`<12` dropped, `>=12` researched)
+- Date freshness calculation in fetch scripts now uses current date at runtime
+- Existing scripts migrated from Supabase SDK to local PostgreSQL queries
+- Frontend API client renamed to `src/lib/api.ts` (removed leftover `supabase` naming)
+- Candidate source lists now include active sources only (LinkedIn/UIUXJobsBoard/WorkInStartups/Indeed/Adzuna)
+
+### Removed
+
+- Netlify scheduled Supabase auto-ghost function (`netlify/functions/auto-ghost.js`)
+- Reed source integration (`scripts/fetch-reed.js`, `fetch:reed`, `REED_*` env settings)
+- Legacy Supabase SQL artifacts (`supabase-*.sql`)
+
 ## [1.1.0] - 2026-01-18
 
 ### Added

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Job } from './types/job';
-import { getJobs, updateJobStatus, deleteJob } from './lib/supabase';
+import { getJobs, updateJobStatus, deleteJob } from './lib/api';
 import Header from './components/Header';
 import FilterBar, { FilterType } from './components/FilterBar';
 import JobList from './components/JobList';

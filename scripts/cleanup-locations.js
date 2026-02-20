@@ -1,62 +1,19 @@
 /**
  * Cleanup Script - Remove Jobs from Wrong Locations
  *
- * Removes jobs from Supabase database that don't match location criteria.
- * This cleanup is needed after adding strict location filtering to API fetch scripts.
+ * Removes jobs from local PostgreSQL that don't match location criteria.
  *
  * USAGE:
  *   node scripts/cleanup-locations.js
- *
- * REQUIRES:
- *   - VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local
- *
- * WHAT THIS DOES:
- *   1. Queries all jobs from database
- *   2. Identifies jobs from wrong locations (London, Sheffield, Wales, etc)
- *   3. Shows list of jobs to be removed
- *   4. Prompts for confirmation
- *   5. Deletes confirmed jobs
- *
- * LOCATION CRITERIA:
- *   ✅ KEEP: Manchester area (Greater Manchester, Salford, Stockport, Bolton,
- *            Oldham, Rochdale, Bury, Wigan, Trafford)
- *   ✅ KEEP: Remote (UK remote, not overseas)
- *   ❌ REMOVE: All other locations
- *
- * @author Job Hunt Dashboard
- * @since 2026-01-18 (Location filtering fix)
  */
 
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { query } from '../lib/db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
-
-// Load environment variables
-dotenv.config({ path: path.join(ROOT, '.env.local') });
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env.local');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-/**
- * Check if location is valid (Manchester area or Remote UK)
- */
 function isValidLocation(location, remote) {
   if (!location) return false;
 
   const loc = location.toLowerCase();
 
-  // Check if Manchester area
   const manchesterKeywords = [
     'manchester',
     'salford',
@@ -66,38 +23,26 @@ function isValidLocation(location, remote) {
     'rochdale',
     'bury',
     'wigan',
-    'trafford'
+    'trafford',
   ];
 
-  const isManchester = manchesterKeywords.some(k => loc.includes(k));
-
-  // Check if remote
+  const isManchester = manchesterKeywords.some((k) => loc.includes(k));
   const isRemote = remote === true || loc.includes('remote');
 
   return isManchester || isRemote;
 }
 
-/**
- * Main execution
- */
 async function main() {
   console.log('\n=== CLEANUP WRONG LOCATIONS ===\n');
 
-  // Step 1: Query all jobs
   console.log('Fetching all jobs from database...');
-  const { data: jobs, error } = await supabase
-    .from('jobs')
-    .select('id, title, company, location, remote, status');
-
-  if (error) {
-    console.error('❌ Failed to fetch jobs:', error.message);
-    process.exit(1);
-  }
+  const { rows: jobs } = await query(
+    'SELECT id, title, company, location, remote, status FROM jobs'
+  );
 
   console.log(`Found ${jobs.length} total jobs\n`);
 
-  // Step 2: Identify invalid locations
-  const invalidJobs = jobs.filter(job => !isValidLocation(job.location, job.remote));
+  const invalidJobs = jobs.filter((job) => !isValidLocation(job.location, job.remote));
 
   console.log(`Invalid locations: ${invalidJobs.length}\n`);
 
@@ -106,7 +51,6 @@ async function main() {
     return;
   }
 
-  // Step 3: Show jobs to be removed
   console.log('Jobs to be REMOVED:\n');
   invalidJobs.forEach((job, i) => {
     console.log(`${i + 1}. ${job.title} at ${job.company}`);
@@ -116,9 +60,8 @@ async function main() {
     console.log(`   ID: ${job.id}\n`);
   });
 
-  // Step 4: Group by location for summary
   const locationCounts = {};
-  invalidJobs.forEach(job => {
+  invalidJobs.forEach((job) => {
     const loc = job.location || 'Unknown';
     locationCounts[loc] = (locationCounts[loc] || 0) + 1;
   });
@@ -131,48 +74,28 @@ async function main() {
     });
   console.log('');
 
-  // Step 5: Delete jobs
   console.log(`Deleting ${invalidJobs.length} jobs...`);
+  const idsToDelete = invalidJobs.map((j) => j.id);
 
-  const idsToDelete = invalidJobs.map(j => j.id);
+  const deleteResult = await query(
+    'DELETE FROM jobs WHERE id = ANY($1::text[])',
+    [idsToDelete]
+  );
 
-  const { error: deleteError } = await supabase
-    .from('jobs')
-    .delete()
-    .in('id', idsToDelete);
+  console.log(`✅ Deleted ${deleteResult.rowCount || 0} jobs from wrong locations\n`);
 
-  if (deleteError) {
-    console.error('❌ Failed to delete jobs:', deleteError.message);
-    process.exit(1);
-  }
-
-  console.log(`✅ Deleted ${invalidJobs.length} jobs from wrong locations\n`);
-
-  // Step 6: Verify
-  const { data: remaining, error: verifyError } = await supabase
-    .from('jobs')
-    .select('id')
-    .in('id', idsToDelete);
-
-  if (verifyError) {
-    console.error('❌ Failed to verify deletion:', verifyError.message);
-  } else if (remaining.length === 0) {
+  const verifyResult = await query('SELECT id FROM jobs WHERE id = ANY($1::text[])', [idsToDelete]);
+  if (verifyResult.rows.length === 0) {
     console.log('✅ Verified: All invalid jobs removed successfully\n');
   } else {
-    console.warn(`⚠️  Warning: ${remaining.length} jobs still in database\n`);
+    console.warn(`⚠️  Warning: ${verifyResult.rows.length} jobs still in database\n`);
   }
 
-  // Step 7: Final count
-  const { data: allJobs, error: countError } = await supabase
-    .from('jobs')
-    .select('id', { count: 'exact', head: true });
-
-  if (!countError) {
-    console.log(`Database now has ${allJobs?.length || 0} jobs (all valid locations)\n`);
-  }
+  const countResult = await query('SELECT COUNT(*)::int AS count FROM jobs');
+  console.log(`Database now has ${countResult.rows[0]?.count || 0} jobs (all valid locations)\n`);
 }
 
-main().catch(error => {
-  console.error('❌ Fatal error:', error);
+main().catch((error) => {
+  console.error('❌ Fatal error:', error.message);
   process.exit(1);
 });

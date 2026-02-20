@@ -1,0 +1,5 @@
+# Weekly run: Monday 07:00 GMT/UTC
+0 7 * * 1 /home/matt99is/projects/JobHuntDashboard/ops/run-pipeline.sh
+
+# Daily auto-ghost cleanup (optional): 02:00 GMT/UTC
+0 2 * * * cd /home/matt99is/projects/JobHuntDashboard && npm run auto-ghost >> logs/auto-ghost.log 2>&1

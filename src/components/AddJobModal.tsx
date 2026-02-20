@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Seniority, RoleType, ApplicationType, Freshness } from '../types/job';
-import { generateJobId, upsertJobs } from '../lib/supabase';
+import { generateJobId, upsertJobs } from '../lib/api';
 
 interface AddJobModalProps {
   isOpen: boolean;

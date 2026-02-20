@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Job Hunt Dashboard pipeline weekly (Monday 07:00 GMT/UTC)
+
+[Timer]
+OnCalendar=Mon *-*-* 07:00:00 UTC
+Persistent=true
+Unit=jobhunt-pipeline.service
+
+[Install]
+WantedBy=timers.target
