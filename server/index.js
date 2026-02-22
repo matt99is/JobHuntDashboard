@@ -1,11 +1,25 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { query, withTransaction } from '../lib/db.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, '..');
+dotenv.config({ path: path.join(ROOT, '.env.local') });
+dotenv.config();
 
 const app = express();
 
+function resolveDashboardScoreCutoff() {
+  const value = process.env.DASHBOARD_SCORE_CUTOFF ?? process.env.JOB_SCORE_CUTOFF ?? '12';
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 12;
+}
+
 const port = Number(process.env.API_PORT || process.env.PORT || 8788);
-const dashboardScoreCutoff = Number(process.env.JOB_SCORE_CUTOFF || 12);
+const dashboardScoreCutoff = resolveDashboardScoreCutoff();
 const frontendOrigins = (process.env.FRONTEND_ORIGIN || '*')
   .split(',')
   .map((origin) => origin.trim())
@@ -73,6 +87,130 @@ function normalizeJob(job) {
   };
 }
 
+function normalizeDedupeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCompanyForDedupe(company) {
+  return normalizeDedupeText(company).replace(/\b(ltd|limited|llp|inc|corp|co|plc)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTitleForDedupe(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function descriptionFingerprint(description) {
+  return normalizeDedupeText(description).slice(0, 120);
+}
+
+function extractSalaryMax(salary) {
+  if (salary === null || salary === undefined) return null;
+  if (typeof salary === 'number') return Number.isFinite(salary) ? salary : null;
+  const matches = [...String(salary).toLowerCase().replace(/,/g, '').matchAll(/(\d+(?:\.\d+)?)\s*(k)?/g)];
+  if (matches.length === 0) return null;
+  const values = matches
+    .map(([, raw, k]) => {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return null;
+      return k ? parsed * 1000 : parsed;
+    })
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (values.length === 0) return null;
+  return Math.max(...values);
+}
+
+function canonicalizeUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.replace(/\/+$/, '');
+    return `${host}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+function sourceCompanyTitleKey(job) {
+  const sourceKey = normalizeDedupeText(job.source);
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `sct:${sourceKey}|${companyKey}|${titleKey}`;
+}
+
+function companyTitleKey(job) {
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `ct:${companyKey}|${titleKey}`;
+}
+
+function normalizeSourceTag(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function mergeSourceTags(...values) {
+  const tags = new Set(values.flatMap((value) => normalizeSourceTag(value)));
+  if (tags.size === 0) return null;
+  return [...tags].sort().join(',');
+}
+
+function dedupeActiveJobs(rows) {
+  const sorted = [...rows].sort((a, b) => {
+    const bySuitability = Number(b.suitability || 0) - Number(a.suitability || 0);
+    if (bySuitability !== 0) return bySuitability;
+    const byCreated = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    return byCreated;
+  });
+
+  const keyOwners = new Map();
+  const deduped = [];
+
+  for (const row of sorted) {
+    const keys = [];
+    const canonicalUrl = canonicalizeUrl(row.url);
+    if (canonicalUrl) {
+      keys.push(`url:${canonicalUrl}`);
+    }
+
+    keys.push(sourceCompanyTitleKey(row));
+    keys.push(companyTitleKey(row));
+
+    const companyKey = normalizeCompanyForDedupe(row.company);
+    const titleKey = normalizeTitleForDedupe(row.title);
+    const salaryKey = extractSalaryMax(row.salary) ?? '';
+    const descKey = descriptionFingerprint(row.description);
+    keys.push(`content:${companyKey}|${titleKey}|${salaryKey}|${descKey}`);
+
+    const owner = keys.find((key) => keyOwners.has(key));
+    if (owner) {
+      const winnerIndex = keyOwners.get(owner);
+      deduped[winnerIndex].source = mergeSourceTags(deduped[winnerIndex].source, row.source);
+      continue;
+    }
+
+    const normalized = {
+      ...row,
+      source: mergeSourceTags(row.source),
+    };
+    const index = deduped.push(normalized) - 1;
+    keys.forEach((key) => keyOwners.set(key, index));
+  }
+
+  return deduped;
+}
+
 app.get('/health', async (_req, res) => {
   try {
     await query('SELECT 1');
@@ -95,7 +233,7 @@ app.get('/api/jobs', async (_req, res) => {
       `,
       [dashboardScoreCutoff]
     );
-    res.json(rows);
+    res.json(dedupeActiveJobs(rows));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

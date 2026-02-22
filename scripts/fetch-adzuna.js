@@ -32,6 +32,8 @@ const SEARCH_QUERIES = [
   { what: 'ux designer', where: 'uk' },
   { what: 'product designer', where: 'uk' }
 ];
+const MAX_JOB_AGE_DAYS = Number(process.env.JOB_MAX_AGE_DAYS || 30);
+const MIN_SALARY = Number(process.env.JOB_MIN_SALARY || 50000);
 
 // Generate consistent job ID
 function generateId(job) {
@@ -66,6 +68,86 @@ function isRecruiter(company, description) {
   return false;
 }
 
+function toSalaryNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getSalaryBounds(job) {
+  const rawMin = toSalaryNumber(job.salary_min);
+  const rawMax = toSalaryNumber(job.salary_max);
+
+  if (Number.isFinite(rawMin) && Number.isFinite(rawMax)) {
+    return {
+      min: Math.min(rawMin, rawMax),
+      max: Math.max(rawMin, rawMax),
+    };
+  }
+
+  if (Number.isFinite(rawMin)) {
+    return { min: rawMin, max: rawMin };
+  }
+
+  if (Number.isFinite(rawMax)) {
+    return { min: rawMax, max: rawMax };
+  }
+
+  return { min: null, max: null };
+}
+
+function hasAny(text, phrases) {
+  return phrases.some((phrase) => text.includes(phrase));
+}
+
+function isUiHeavyDescription(descLower) {
+  const explicitUiHeavyPhrases = [
+    'strong ui skills',
+    'strong visual design',
+    'visual-first',
+    'visual first',
+    'pixel perfect',
+    'high fidelity ui',
+    'ui-heavy',
+    'ui heavy',
+    'expert in ui',
+    'advanced ui',
+    'ui polish',
+    'brand-led visual',
+    'motion design',
+    'animation-heavy',
+    'illustration-heavy',
+  ];
+
+  if (hasAny(descLower, explicitUiHeavyPhrases)) return true;
+
+  const uiSignals = [
+    'visual design',
+    'ui design',
+    'high fidelity',
+    'pixel perfect',
+    'typography',
+    'iconography',
+    'brand guidelines',
+    'after effects',
+    'photoshop',
+  ];
+  const uxSignals = [
+    'user research',
+    'usability',
+    'discovery',
+    'interaction design',
+    'journey',
+    'information architecture',
+    'prototype',
+    'testing',
+  ];
+
+  const uiCount = uiSignals.filter((signal) => descLower.includes(signal)).length;
+  const uxCount = uxSignals.filter((signal) => descLower.includes(signal)).length;
+  return uiCount >= 3 && uxCount === 0;
+}
+
 // Check if job should be excluded
 function shouldExclude(job, description) {
   const title = job.title.toLowerCase();
@@ -97,8 +179,8 @@ function shouldExclude(job, description) {
     return 'overseas-remote';
   }
 
-  // Exclude if >14 days old (stale)
-  if (age > 14) return 'stale';
+  // Exclude if older than configured freshness window (default: 30 days)
+  if (age > MAX_JOB_AGE_DAYS) return 'stale';
 
   // Exclude contract/freelance/part-time
   if (title.includes('contract') || title.includes('freelance') ||
@@ -136,8 +218,8 @@ function shouldExclude(job, description) {
     return 'lead';
   }
 
-  // Exclude strong UI Designer emphasis
-  if (title.startsWith('ui ') || title.startsWith('ui/ux')) return 'ui-focus';
+  // Exclude UI-heavy roles only when explicitly stated in the description.
+  if (isUiHeavyDescription(descLower)) return 'ui-focus';
 
   // Exclude Senior Product Designer
   if (title.includes('senior') && title.includes('product designer')) return 'senior-pd';
@@ -148,9 +230,10 @@ function shouldExclude(job, description) {
     return 'gambling';
   }
 
-  // Exclude if salary below £50k (for any role)
-  if (job.salary_min && job.salary_min < 50000) {
-    return 'low-salary';
+  // Exclude jobs without a clear salary above configured minimum.
+  const salary = getSalaryBounds(job);
+  if (!Number.isFinite(salary.max) || salary.max <= MIN_SALARY) {
+    return 'salary-below-threshold';
   }
 
   // Exclude service/digital/content designer
@@ -174,17 +257,23 @@ function calculateScore(job, description) {
   const title = job.title.toLowerCase();
   const desc = description.toLowerCase();
   const age = daysSince(job.created);
+  const salary = getSalaryBounds(job);
+  const salaryMax = Number.isFinite(salary.max) ? salary.max : 0;
 
-  // E-commerce, retail, conversion, figma, user research: +3 each
-  if (desc.includes('e-commerce') || desc.includes('ecommerce') || desc.includes('retail')) score += 3;
-  if (desc.includes('conversion') || desc.includes('cro')) score += 3;
-  if (desc.includes('figma')) score += 3;
-  if (desc.includes('user research') || desc.includes('user testing')) score += 3;
+  // Description-led interpretation across domain, method, and delivery context.
+  if (hasAny(desc, ['e-commerce', 'ecommerce', 'retail', 'checkout', 'marketplace'])) score += 3;
+  if (hasAny(desc, ['conversion', 'cro', 'funnel', 'a/b test', 'ab test', 'experimentation'])) score += 3;
+  if (hasAny(desc, ['user research', 'usability testing', 'interview', 'discovery', 'journey mapping'])) score += 3;
+  if (hasAny(desc, ['figma', 'prototype', 'wireframe', 'interaction design', 'information architecture'])) score += 2;
+  if (hasAny(desc, ['design system', 'component library', 'accessibility', 'wcag'])) score += 2;
+  if (hasAny(desc, ['b2b', 'saas', 'product thinking', 'outcomes', 'kpi', 'metrics'])) score += 2;
+  if (hasAny(desc, ['cross-functional', 'stakeholder', 'partner with engineers', 'product manager', 'end-to-end'])) score += 2;
+  if (hasAny(desc, ['gds', 'government digital service', 'service standard'])) score += 2;
 
-  // B2B, SaaS, design system, prototyping: +2 each
-  if (desc.includes('b2b') || desc.includes('saas')) score += 2;
-  if (desc.includes('design system')) score += 2;
-  if (desc.includes('prototyp')) score += 2;
+  // Base fit for core target role families.
+  if (title.includes('ux designer') || title.includes('product designer') || title.includes('interaction designer')) {
+    score += 2;
+  }
 
   // Seniority
   if (title.includes('senior') && title.includes('ux')) score += 3;
@@ -194,17 +283,12 @@ function calculateScore(job, description) {
   if (job.location.area && job.location.area.includes('Remote')) score += 2;
 
   // Salary
-  if (job.salary_min) {
-    if (job.salary_min >= 80000) score += 3;
-    else if (job.salary_min >= 65000) score += 2;
-    else if (job.salary_min >= 50000) score += 1;
-  }
+  if (salaryMax >= 80000) score += 3;
+  else if (salaryMax >= 65000) score += 2;
+  else if (salaryMax > MIN_SALARY) score += 1;
 
   // Freshness
-  if (age < 14) score += 2;
-
-  // UI/UX penalty
-  if (title.includes('ui/ux') || title.includes('ui designer')) score -= 5;
+  if (age <= MAX_JOB_AGE_DAYS) score += 2;
 
   return Math.max(0, score);
 }
@@ -228,7 +312,7 @@ function getRoleType(title) {
 // Determine freshness
 function getFreshness(age) {
   if (age < 7) return 'fresh';
-  if (age < 14) return 'recent';
+  if (age <= MAX_JOB_AGE_DAYS) return 'recent';
   return 'stale';
 }
 

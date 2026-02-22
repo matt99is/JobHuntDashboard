@@ -11,6 +11,7 @@
  * INPUTS:
  *   - candidates/research-queue.json (jobs that were researched)
  *   - candidates/adzuna.json (original candidate data)
+ *   - candidates/gmail.json (original candidate data)
  *   - Research results from AI agents (passed as JSON string or file)
  *
  * OUTPUTS:
@@ -65,7 +66,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 // Candidate sources to update (must match filenames in candidates/ directory)
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
+const SOURCES = ['gmail', 'adzuna'];
 
 // === HELPER FUNCTIONS ===
 

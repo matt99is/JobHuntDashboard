@@ -10,6 +10,7 @@
  *
  * INPUTS:
  *   - candidates/adzuna.json (from fetch-adzuna.js)
+ *   - candidates/gmail.json (from gather-with-claude.js)
  *   - Local PostgreSQL jobs table (to check existing jobs)
  *
  * OUTPUTS:
@@ -17,7 +18,7 @@
  *   - Console summary showing new vs existing jobs
  *
  * CRITERIA FOR RESEARCH:
- *   1. Job is NEW (not in database by ID or company+title match)
+ *   1. Job is NEW (not in database by ID or normalized source+company+title match)
  *   2. Suitability score >= cutoff (default 12, configurable)
  *   3. Not marked as recruiter placeholder (type !== 'recruiter')
  *
@@ -47,10 +48,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 // Candidate sources to check (must match filenames in candidates/ directory)
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
+const SOURCES = ['gmail', 'adzuna'];
 
 // Minimum suitability score to trigger company research.
 const RESEARCH_THRESHOLD = Number(process.env.JOB_SCORE_CUTOFF || 12);
+const MIN_SALARY = Number(process.env.JOB_MIN_SALARY || 50000);
 
 // === HELPER FUNCTIONS ===
 
@@ -71,6 +73,117 @@ function generateId(job) {
     .slice(0, 30);                // Limit length for database compatibility
 
   return `${norm(job.source)}-${norm(job.company)}-${norm(job.title)}`;
+}
+
+function extractSalaryBounds(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? { min: value, max: value } : null;
+  }
+
+  const text = String(value).toLowerCase().replace(/,/g, '');
+  const matches = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(k)?/g)];
+  if (matches.length === 0) return null;
+
+  const numbers = matches
+    .map(([, raw, k]) => {
+      const num = Number(raw);
+      if (!Number.isFinite(num)) return null;
+      return k ? num * 1000 : num;
+    })
+    .filter((num) => Number.isFinite(num) && num > 0);
+
+  if (numbers.length === 0) return null;
+  return {
+    min: Math.min(...numbers),
+    max: Math.max(...numbers),
+  };
+}
+
+function normalizeDedupeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCompanyForDedupe(company) {
+  return normalizeDedupeText(company).replace(/\b(ltd|limited|llp|inc|corp|co|plc)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTitleForDedupe(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function descriptionFingerprint(description) {
+  return normalizeDedupeText(description).slice(0, 120);
+}
+
+function canonicalizeUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.toLowerCase();
+    const cleanPath = parsed.pathname.replace(/\/+$/, '');
+    return `${host}${cleanPath}`;
+  } catch {
+    return null;
+  }
+}
+
+function sourceCompanyTitleKey(job) {
+  const sourceKey = normalizeDedupeText(job.source);
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `sct:${sourceKey}|${companyKey}|${titleKey}`;
+}
+
+function companyTitleKey(job) {
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `ct:${companyKey}|${titleKey}`;
+}
+
+function buildDedupeKeys(job) {
+  const keys = [];
+  const canonicalUrl = canonicalizeUrl(job.url);
+  if (canonicalUrl) {
+    keys.push(`url:${canonicalUrl}`);
+  }
+
+  keys.push(sourceCompanyTitleKey(job));
+  keys.push(companyTitleKey(job));
+
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  const descKey = descriptionFingerprint(job.description);
+  keys.push(`content:${companyKey}|${titleKey}|${descKey}`);
+
+  return keys;
+}
+
+function normalizeSourceTag(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function mergeSourceTags(...values) {
+  const tags = new Set(values.flatMap((value) => normalizeSourceTag(value)));
+  if (tags.size === 0) return null;
+  return [...tags].sort().join(',');
+}
+
+function hasSalaryAboveFloor(job) {
+  const bounds = extractSalaryBounds(job.salary);
+  return bounds && Number.isFinite(bounds.max) && bounds.max > MIN_SALARY;
 }
 
 /**
@@ -108,7 +221,7 @@ function loadCandidates() {
 }
 
 /**
- * Deduplicate jobs by company+title (keep highest score)
+ * Deduplicate jobs by canonical URL and normalized source/company/title
  *
  * When multiple sources return the same job, we keep the one with the
  * highest suitability score. This matches the deduplication logic in sync-jobs.js.
@@ -120,18 +233,34 @@ function loadCandidates() {
  * @returns {Array} - Deduplicated jobs
  */
 function dedupe(jobs) {
-  const seen = new Map();
+  const sorted = [...jobs].sort((a, b) => {
+    const bySuitability = Number(b.suitability || 0) - Number(a.suitability || 0);
+    if (bySuitability !== 0) return bySuitability;
+    const byPosted = new Date(b.postedAt || 0).getTime() - new Date(a.postedAt || 0).getTime();
+    return byPosted;
+  });
 
-  for (const job of jobs) {
-    const key = `${job.company?.toLowerCase()}-${job.title?.toLowerCase()}`;
+  const keyOwners = new Map();
+  const deduped = [];
 
-    // Keep this job if we haven't seen it OR if it has a higher score
-    if (!seen.has(key) || job.suitability > seen.get(key).suitability) {
-      seen.set(key, job);
+  for (const job of sorted) {
+    const keys = buildDedupeKeys(job);
+    const owner = keys.find((key) => keyOwners.has(key));
+    if (owner) {
+      const winnerIndex = keyOwners.get(owner);
+      deduped[winnerIndex].source = mergeSourceTags(deduped[winnerIndex].source, job.source);
+      continue;
     }
+
+    const normalized = {
+      ...job,
+      source: mergeSourceTags(job.source),
+    };
+    const index = deduped.push(normalized) - 1;
+    keys.forEach((key) => keyOwners.set(key, index));
   }
 
-  return Array.from(seen.values());
+  return deduped;
 }
 
 /**
@@ -144,7 +273,7 @@ function dedupe(jobs) {
  * @throws {Error} - If database query fails
  */
 async function fetchExistingJobs() {
-  const { rows } = await query('SELECT id, title, company FROM jobs');
+  const { rows } = await query('SELECT id, source, title, company, url, description FROM jobs');
   return rows || [];
 }
 
@@ -153,7 +282,7 @@ async function fetchExistingJobs() {
  *
  * A job is considered "existing" if either:
  *   1. The ID matches (exact same job from same source)
- *   2. The company+title combination matches (same job from different source)
+ *   2. The normalized source+company+title combination matches
  *
  * This prevents duplicate jobs from being researched or re-synced.
  *
@@ -164,15 +293,16 @@ async function fetchExistingJobs() {
 function filterNewJobs(jobs, existing) {
   // Build lookup sets for fast O(1) checking
   const existingIds = new Set(existing.map(j => j.id));
-  const existingKeys = new Set(
-    existing.map(j => `${j.company?.toLowerCase()}-${j.title?.toLowerCase()}`)
-  );
+  const existingKeys = new Set();
+  for (const row of existing) {
+    for (const key of buildDedupeKeys(row)) {
+      existingKeys.add(key);
+    }
+  }
 
   return jobs.filter(job => {
-    const key = `${job.company?.toLowerCase()}-${job.title?.toLowerCase()}`;
-
     // Keep job only if BOTH checks fail (not in database)
-    return !existingIds.has(job.id) && !existingKeys.has(key);
+    return !existingIds.has(job.id) && !buildDedupeKeys(job).some((key) => existingKeys.has(key));
   });
 }
 
@@ -188,6 +318,10 @@ function filterNewJobs(jobs, existing) {
  */
 function filterNeedsResearch(jobs) {
   return jobs.filter(job => {
+    if (!hasSalaryAboveFloor(job)) {
+      return false;
+    }
+
     // Skip if below threshold
     if ((job.suitability || 0) < RESEARCH_THRESHOLD) {
       return false;
@@ -247,8 +381,14 @@ async function main() {
     return;
   }
 
+  const salaryEligibleJobs = newJobs.filter(hasSalaryAboveFloor);
+  const salaryFilteredOut = newJobs.length - salaryEligibleJobs.length;
+  if (salaryFilteredOut > 0) {
+    console.log(`Filtered out ${salaryFilteredOut} jobs without salary above £${MIN_SALARY.toLocaleString()}\n`);
+  }
+
   // Step 5: Filter to jobs that need research
-  const needsResearch = filterNeedsResearch(newJobs);
+  const needsResearch = filterNeedsResearch(salaryEligibleJobs);
   console.log(`Jobs needing research (suitability >= ${RESEARCH_THRESHOLD}): ${needsResearch.length}\n`);
 
   // Step 6: Write research queue
@@ -261,8 +401,9 @@ async function main() {
   console.log(`Total candidates: ${all.length}`);
   console.log(`After dedupe: ${unique.length}`);
   console.log(`New jobs: ${newJobs.length}`);
+  console.log(`Salary-eligible jobs (> £${MIN_SALARY.toLocaleString()}): ${salaryEligibleJobs.length}`);
   console.log(`Needs research: ${needsResearch.length}`);
-  console.log(`Skipped (low score or recruiter): ${newJobs.length - needsResearch.length}\n`);
+  console.log(`Skipped (salary, low score, or recruiter): ${newJobs.length - needsResearch.length}\n`);
 
   // Step 8: Show top jobs to research
   if (needsResearch.length > 0) {

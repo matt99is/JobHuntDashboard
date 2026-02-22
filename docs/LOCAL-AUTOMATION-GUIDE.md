@@ -1,93 +1,110 @@
-# Local Database + Automated AI Pipeline Guide
+# Local Automation Guide
 
-This guide explains how the new setup works in simple terms.
+This guide explains how automated runs work once setup is complete.
+For installation/provisioning, use `docs/SERVER-SETUP.md`.
 
-## 1) High-level flow
+## 1) What runs automatically
 
-1. Netlify serves the frontend.
-2. Frontend calls your server API.
-3. API reads/writes local PostgreSQL.
-4. Weekly scheduler runs AI pipeline.
-5. Telegram receives run status updates.
+- Weekly pipeline run: Monday `07:00 UTC`
+- Trigger script: `ops/run-pipeline.sh`
+- Orchestrator: `scripts/run-ai-pipeline.js`
 
-## 2) Why this setup
+Optional:
+- Daily auto-ghost run: `npm run auto-ghost` (cron/systemd if you enable it)
 
-- Keeps frontend deployment simple (Netlify).
-- Keeps data private and local (Ubuntu PostgreSQL).
-- Keeps job search quality high (AI-driven gathering and research).
-- Keeps costs controlled (Haiku-first model policy + score cutoff).
+## 2) Current pipeline behavior
 
-## 3) Score policy
+1. Fetch deterministic jobs from Adzuna.
+2. Gather Gmail label alerts (`Jobs` by default), then enrich listing data via web tools.
+3. Dedupe and filter new jobs.
+4. Research shortlist.
+5. Merge research results.
+6. Sync qualifying jobs to PostgreSQL.
 
-- Any role below **12** is dropped.
-- Any role **12 or above** gets researched.
+Only two intake sources are active:
+- `adzuna`
+- `gmail`
 
-## 4) Weekly schedule
+## 3) Locking and logs
 
-- Monday at 07:00 GMT/UTC.
-- Trigger command: `ops/run-pipeline.sh`
+`ops/run-pipeline.sh` provides:
+- lock file: `.locks/pipeline.lock`
+- run log: `logs/pipeline-YYYYMMDD-HHMMSS.log`
 
-## 5) Automation states
+Pipeline run artifacts:
+- `runs/<run-id>/run.json`
+- `runs/<run-id>/<step>.log`
 
-A run can end in one of these states:
-- `success`: completed normally
-- `failed`: hard failure
-- `needs_intervention`: AI output invalid/unclear, manual review needed
+## 4) Status model
 
-## 6) Important files
+`run.json` status values:
+- `running`
+- `success`
+- `failed`
 
-- `database/schema.sql` - local DB schema
-- `server/index.js` - API for frontend
-- `scripts/run-ai-pipeline.js` - orchestrator
-- `scripts/gather-with-claude.js` - intake from email/web
-- `scripts/research-with-claude.js` - company research
-- `ops/run-pipeline.sh` - scheduler entrypoint
+Intervention classification:
+- If an error contains `NEEDS_INTERVENTION`, notification event type is `pipeline_attention_needed`.
+- Otherwise, event type is `pipeline_failed`.
 
-## 7) Telegram notifications
+## 5) Notifications
 
-If `SYSTEM_NOTIFY_SCRIPT` is configured, notifications are sent for:
-- run started
-- run completed
-- run failed
-- intervention needed
+Notifications are optional and script-based:
+- `SYSTEM_NOTIFY_SCRIPT`
+- `SYSTEM_NOTIFY_PROJECT`
 
-## 8) Gmail intake — how it works
+If notification script is missing/unset, pipeline continues and logs `[notify-skip]`.
 
-The gather step uses `@anthropic-ai/claude-agent-sdk` (not `claude -p`) so it can inject the Google Workspace MCP server directly into the session. This mirrors the Telegram bot setup at `/opt/claude-bot/app/claude-agent.js`.
+## 6) Gmail intake details
 
-The MCP server runs as: `uvx workspace-mcp --single-user --tools gmail`
+Gather script: `scripts/gather-with-claude.js`
 
-Credentials are stored in `~/.google_workspace_mcp/credentials/mattlelonek@gmail.com.json` and are picked up automatically in single-user mode.
+Behavior:
+- Uses workspace-mcp Gmail tools (`uvx workspace-mcp --single-user --tools gmail`)
+- Reads label `GMAIL_JOB_LABEL` (default `Jobs`)
+- Reads lookback window `GMAIL_JOB_LOOKBACK_DAYS` (default `7`)
+- Uses Gmail for discovery and WebSearch/WebFetch for listing enrichment
+- Writes normalized output to `candidates/gmail.json`
 
-Required env vars in `.env.local`:
+Required env keys for gather:
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `USER_GOOGLE_EMAIL`
+
+## 7) Troubleshooting quick checks
+
+1. Latest run metadata
+```bash
+ls -1 runs | tail -n 3
+cat runs/<run-id>/run.json
 ```
-GOOGLE_OAUTH_CLIENT_ID=...
-GOOGLE_OAUTH_CLIENT_SECRET=...   # workspace-mcp credential, not ~/.credentials/
-USER_GOOGLE_EMAIL=mattlelonek@gmail.com
+
+2. Scheduler logs
+```bash
+ls -lt logs | head
 ```
 
-**Troubleshooting:**
+3. Gmail gather diagnostics
+```bash
+cat candidates/gather-raw-output.txt
+cat runs/<run-id>/gather-with-claude.log
+```
 
-If the gather step fails with `NEEDS_INTERVENTION: GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_SECRET not set`, check `.env.local`.
+4. Manual recovery
+```bash
+npm run pipeline:run
+```
 
-If the gather step completes but `gmail_checked: false`, check `runs/<run-id>/gather-raw-output.txt` and `candidates/gather-raw-output.txt` for Claude's raw output. Common causes:
-- workspace-mcp failed to start (check `uvx workspace-mcp --help` works)
-- Google OAuth token expired — re-authenticate via the Telegram bot which uses the same credentials
-- `~/.google_workspace_mcp/credentials/` is missing or empty
+## 8) Common failure causes
+
+- Missing OAuth env keys for Gmail gather
+- Expired/missing workspace-mcp credentials in `~/.google_workspace_mcp/credentials/`
+- Adzuna credentials missing/invalid
+- Database connectivity issues (`DATABASE_URL` / `DB_*`)
 
 ## 9) Safe rollout checklist
 
-1. Start API and confirm `/health` works.
-2. Run `npm run db:init`.
-3. Run one manual pipeline test: `npm run pipeline:run`.
-4. Verify frontend can load and update jobs.
-5. Enable weekly cron/systemd schedule.
-
-## 10) Historical data import notes
-
-If you have existing jobs in another system, export and import them before cutover.
-Typical approach:
-1. Export `jobs` as CSV.
-2. Create local schema: `npm run db:init`.
-3. Import CSV into local `jobs` table (psql `\\copy` or pgAdmin import).
-4. Verify row count and spot-check status/timestamps.
+1. Confirm API health: `curl -fsS http://localhost:8788/health`
+2. Confirm schema applied: `npm run db:init`
+3. Run one full pipeline manually: `npm run pipeline:run`
+4. Confirm new rows appear in DB/dashboard
+5. Enable weekly timer/cron

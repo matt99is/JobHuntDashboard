@@ -10,8 +10,12 @@ const CANDIDATES_DIR = path.join(ROOT, 'candidates');
 dotenv.config({ path: path.join(ROOT, '.env.local') });
 dotenv.config();
 const SCORE_CUTOFF = Number(process.env.JOB_SCORE_CUTOFF || 12);
+const MAX_JOB_AGE_DAYS = Number(process.env.JOB_MAX_AGE_DAYS || 30);
+const MIN_SALARY = Number(process.env.JOB_MIN_SALARY || 50000);
+const GMAIL_LABEL = process.env.GMAIL_JOB_LABEL || 'Jobs';
+const GMAIL_LOOKBACK_DAYS = Number(process.env.GMAIL_JOB_LOOKBACK_DAYS || 7);
 
-const OUTPUT_SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed'];
+const OUTPUT_SOURCES = ['gmail'];
 
 // Google Workspace MCP server — same config as Telegram bot (claude-agent.js)
 const GOOGLE_WORKSPACE_MCP = {
@@ -35,10 +39,6 @@ const GOOGLE_WORKSPACE_MCP = {
 const GMAIL_ALLOWED_TOOLS = [
   'mcp__google-workspace__search_gmail_messages',
   'mcp__google-workspace__get_gmail_message_content',
-  'mcp__google-workspace__get_gmail_messages_content_batch',
-  'mcp__google-workspace__get_gmail_attachment_content',
-  'mcp__google-workspace__get_gmail_thread_content',
-  'mcp__google-workspace__get_gmail_threads_content_batch',
   'mcp__google-workspace__list_gmail_labels',
 ];
 
@@ -117,8 +117,9 @@ class Spinner {
 async function runClaude(prompt) {
   const model = process.env.CLAUDE_GATHER_MODEL || 'haiku';
   const maxTurns = Number(process.env.CLAUDE_GATHER_MAX_TURNS || '15');
-  const timeoutMs = Number(process.env.CLAUDE_GATHER_TIMEOUT_MS || 25 * 60 * 1000);
+  const timeoutMs = Number(process.env.CLAUDE_GATHER_TIMEOUT_MS || 3 * 60 * 1000);
   const allowedTools = buildAllowedTools();
+  const allowedToolSet = new Set(allowedTools);
 
   const options = {
     model,
@@ -127,7 +128,11 @@ async function runClaude(prompt) {
     permissionMode: 'acceptEdits',
     cwd: ROOT,
     mcpServers: GOOGLE_WORKSPACE_MCP,
-    canUseTool: async (_toolName, input) => ({ behavior: 'allow', updatedInput: input }),
+    canUseTool: async (toolName, input) => (
+      allowedToolSet.has(toolName)
+        ? { behavior: 'allow', updatedInput: input }
+        : { behavior: 'deny' }
+    ),
   };
 
   let resultText = '';
@@ -158,14 +163,21 @@ async function runClaude(prompt) {
     return resultText.trim();
   };
 
-  const timeout = new Promise((_, reject) =>
-    setTimeout(
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(
       () => reject(new Error('NEEDS_INTERVENTION: Gather step timed out.')),
       timeoutMs
-    )
-  );
+    );
+  });
 
-  return Promise.race([run(), timeout]);
+  try {
+    return await Promise.race([run(), timeout]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function extractJsonObject(text) {
@@ -179,22 +191,84 @@ function extractJsonObject(text) {
   return JSON.parse(candidate);
 }
 
+function normalizeApplicationType(rawType, company = '', description = '') {
+  const text = `${rawType || ''} ${company || ''} ${description || ''}`.toLowerCase();
+  const recruiterSignals = [
+    'recruiter',
+    'recruitment',
+    'agency',
+    'staffing',
+    'talent partner',
+    'headhunter',
+  ];
+  return recruiterSignals.some((signal) => text.includes(signal)) ? 'recruiter' : 'direct';
+}
+
+function normalizeSeniority(rawSeniority, title = '') {
+  const text = `${rawSeniority || ''} ${title || ''}`.toLowerCase();
+  if (text.includes('lead') || text.includes('principal') || text.includes('head')) return 'lead';
+  if (text.includes('senior') || text.includes('sr')) return 'senior';
+  if (text.includes('junior') || text.includes('entry')) return 'junior';
+  return 'mid';
+}
+
+function normalizeRoleType(rawRoleType, title = '', description = '') {
+  const text = `${rawRoleType || ''} ${title || ''} ${description || ''}`.toLowerCase();
+  return text.includes('product') ? 'product' : 'ux';
+}
+
+function normalizeFreshness(rawFreshness, postedAt) {
+  const fromPostedAt = (() => {
+    if (!postedAt) return null;
+    const posted = new Date(postedAt);
+    if (Number.isNaN(posted.getTime())) return null;
+    const days = Math.floor((Date.now() - posted.getTime()) / (1000 * 60 * 60 * 24));
+    if (days < 0) return null;
+    if (days < 7) return 'fresh';
+    if (days <= MAX_JOB_AGE_DAYS) return 'recent';
+    return 'stale';
+  })();
+  if (fromPostedAt) return fromPostedAt;
+
+  const text = String(rawFreshness || '').toLowerCase();
+  if (!text) return 'unknown';
+  if (text.includes('fresh')) return 'fresh';
+  if (text.includes('recent')) return 'recent';
+  if (text.includes('stale')) return 'stale';
+
+  const dayMatch = text.match(/(\d+)\s*day/);
+  if (dayMatch) {
+    const days = Number(dayMatch[1]);
+    if (Number.isFinite(days)) {
+      if (days < 7) return 'fresh';
+      if (days <= MAX_JOB_AGE_DAYS) return 'recent';
+      return 'stale';
+    }
+  }
+
+  return 'unknown';
+}
+
 function normalizeJob(source, raw) {
+  const title = raw.title || '';
+  const description = raw.description || '';
+  const postedAt = raw.postedAt || null;
+
   return {
-    title: raw.title,
+    title,
     company: raw.company,
     location: raw.location || null,
     source,
-    type: raw.type || 'direct',
+    type: normalizeApplicationType(raw.type, raw.company, description),
     url: raw.url || null,
     remote: Boolean(raw.remote),
     salary: raw.salary || null,
-    seniority: raw.seniority || 'mid',
-    roleType: raw.roleType || (String(raw.title || '').toLowerCase().includes('product') ? 'product' : 'ux'),
-    freshness: raw.freshness || 'unknown',
-    description: raw.description || '',
+    seniority: normalizeSeniority(raw.seniority, title),
+    roleType: normalizeRoleType(raw.roleType, title, description),
+    freshness: normalizeFreshness(raw.freshness, postedAt),
+    description,
     suitability: Number.isFinite(Number(raw.suitability)) ? Number(raw.suitability) : 0,
-    postedAt: raw.postedAt || null,
+    postedAt,
   };
 }
 
@@ -204,22 +278,30 @@ function saveSourceJobs(source, jobs) {
 }
 
 function buildPrompt() {
+  const safeLookbackDays = Number.isFinite(GMAIL_LOOKBACK_DAYS) && GMAIL_LOOKBACK_DAYS > 0
+    ? Math.floor(GMAIL_LOOKBACK_DAYS)
+    : 7;
+
   return `You are running job intake for a UX/Product Designer job dashboard.
 
-Run web + email intake in parallel and return ONLY one JSON object with keys:
-linkedin, uiuxjobsboard, workinstartups, indeed.
-Each key must map to an array of jobs.
+Run Gmail + web enrichment intake and return ONLY one JSON object with key:
+gmail
+The key must map to an array of jobs.
 
 Tool rules:
 - DO NOT use browser or playwright tools.
 - DO NOT dispatch Task sub-agents.
 - Use only WebSearch/WebFetch and Gmail MCP tools directly.
 
-Use tools in parallel where possible:
-- LinkedIn/email alerts: use Gmail MCP tools for recent LinkedIn job alerts (last 7 days), open relevant messages, extract job listing links and details.
-- UIUXJobsBoard: fetch current UK remote listings.
-- WorkInStartups: fetch design jobs.
-- Indeed UK: fetch UX/product designer listings; if blocked or unavailable return an empty array for indeed.
+Gmail source requirements:
+- Use Gmail label exactly "${GMAIL_LABEL}".
+- Search scope is last ${safeLookbackDays} days only.
+- Use Gmail MCP query equivalent to label + time window (for example: label:${GMAIL_LABEL} newer_than:${safeLookbackDays}d).
+- Process all matching emails in that window (no arbitrary cap). Deduplicate candidate links from emails first.
+- Gmail is discovery-only: every shortlisted role from email MUST be verified with WebFetch/WebSearch to retrieve full role description, salary, location, and remote details before scoring.
+- Do not score or include roles based only on email snippets/subject lines.
+- If a listing URL is a redirect/aggregator page, follow through with WebFetch/WebSearch to find the direct listing details where possible.
+- If a source page is blocked, use WebSearch to recover the role details before deciding.
 
 For EACH job, output fields:
 {title, company, location, type, url, remote, salary, seniority, roleType, freshness, description, suitability, postedAt}
@@ -228,36 +310,63 @@ Hard filters:
 - Keep ONLY Manchester-area or Remote UK roles.
 - Exclude contract/freelance/part-time.
 - Exclude lead/principal/head-of roles.
-- Exclude strong UI-only focus roles.
-- Exclude stale jobs older than 14 days.
+- Exclude strong UI-only focus roles ONLY when full description explicitly asks for strong visual/UI-heavy ownership (pixel-perfect visual craft, visual-first scope, etc.).
+- Do NOT exclude UX/UI titles by title alone when UI-heavy requirements are not clearly stated.
+- Exclude stale jobs older than ${MAX_JOB_AGE_DAYS} days.
+- Exclude jobs with missing salary or salary <= £${MIN_SALARY}.
 
-Scoring:
-- ecommerce/retail/user research/conversion/figma: +3 each
-- b2b/saas/prototyping/design system: +2 each
+Scoring (intelligent interpretation of full description, not strict keyword matching):
+- Domain/problem fit (ecommerce, conversion, customer journeys, measurable outcomes): +0 to +6
+- Research and discovery depth (user research, usability, interviews, discovery): +0 to +5
+- Product craft and delivery (IA, interaction design, prototyping, design systems, Figma): +0 to +5
+- Product context and collaboration (B2B/SaaS, cross-functional ownership, PM/engineering partnership): +0 to +4
 - Senior UX: +3, Mid UX: +2
-- Remote: +2
-- 80k+: +3, 65-79k: +2, 50-64k: +1
-- UI/UX or UI-designer emphasis: -5
+- Remote UK: +2
+- Salary: 80k+: +3, 65-79k: +2, >50k: +1
 
 Cutoff:
 - Drop any role scoring below ${SCORE_CUTOFF}.
 - Return ONLY jobs with suitability >= ${SCORE_CUTOFF}.
 
+Deduplication before output:
+- Dedupe the gmail array by canonical URL first.
+- If URL is missing, dedupe by normalized company + title + location.
+
 Output rules:
 - Return strict JSON only (no markdown, no prose).
-- Ensure every array exists even if empty.
+- Ensure the gmail array exists even if empty.
 - Include this diagnostics object:
   "_meta": {
     "gmail_checked": true|false,
     "gmail_messages_scanned": number,
     "gmail_tool_used": "google-workspace|gmail|none",
-    "gmail_error": null|string
+    "gmail_error": null|string,
+    "gmail_label": "${GMAIL_LABEL}",
+    "gmail_window_days": ${safeLookbackDays}
   }
 `;
 }
 
+function isAuthIntervention(message) {
+  return /GOOGLE_OAUTH_CLIENT_ID|GOOGLE_OAUTH_CLIENT_SECRET|authentication required|authorize/i.test(String(message || ''));
+}
+
+function buildFallbackPayload(errorMessage) {
+  return {
+    gmail: [],
+    _meta: {
+      gmail_checked: true,
+      gmail_messages_scanned: 0,
+      gmail_tool_used: 'google-workspace',
+      gmail_error: `Fallback mode: ${errorMessage}`,
+      gmail_label: GMAIL_LABEL,
+      gmail_window_days: Number.isFinite(GMAIL_LOOKBACK_DAYS) ? GMAIL_LOOKBACK_DAYS : 7,
+    },
+  };
+}
+
 async function main() {
-  console.log('\n=== CLAUDE GATHER (EMAIL + WEB) ===\n');
+  console.log('\n=== CLAUDE GATHER (GMAIL + WEB ENRICHMENT) ===\n');
 
   if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
     throw new Error(
@@ -265,17 +374,47 @@ async function main() {
     );
   }
 
+  // Prevent nested Claude Code sessions — SDK spawns a new `claude` process which fails if CLAUDECODE is set
+  delete process.env.CLAUDECODE;
+
   fs.mkdirSync(CANDIDATES_DIR, { recursive: true });
 
-  const output = await runClaude(buildPrompt());
+  let output = '';
+  let parsed = null;
+  let gatherError = null;
+
+  try {
+    output = await runClaude(buildPrompt());
+    parsed = extractJsonObject(output);
+  } catch (error) {
+    gatherError = error;
+    try {
+      console.warn('Gather output was not valid JSON. Retrying once with strict JSON-only instruction...');
+      output = await runClaude(`${buildPrompt()}\n\nCRITICAL: Return only the final JSON object now. If intake fails, keep gmail as an empty array and explain in _meta.gmail_error.`);
+      parsed = extractJsonObject(output);
+      gatherError = null;
+    } catch (retryError) {
+      gatherError = retryError;
+    }
+  }
+
+  if (!parsed) {
+    const message = String(gatherError?.message || gatherError || 'Unknown gather failure');
+    if (isAuthIntervention(message)) {
+      throw gatherError instanceof Error ? gatherError : new Error(message);
+    }
+    console.warn(`Gather failed non-fatally; continuing with empty source payloads. Reason: ${message}`);
+    parsed = buildFallbackPayload(message);
+    output = JSON.stringify(parsed, null, 2);
+  }
+
   fs.writeFileSync(path.join(CANDIDATES_DIR, 'gather-raw-output.txt'), output);
-  const parsed = extractJsonObject(output);
-  const linkedinRows = Array.isArray(parsed.linkedin) ? parsed.linkedin : [];
+  const gmailRows = Array.isArray(parsed.gmail) ? parsed.gmail : [];
   const meta = parsed && typeof parsed === 'object' && parsed._meta && typeof parsed._meta === 'object'
     ? parsed._meta
     : {};
 
-  const gmailChecked = meta.gmail_checked === true || linkedinRows.length > 0;
+  const gmailChecked = meta.gmail_checked === true || gmailRows.length > 0;
   const gmailScanned = Number(meta.gmail_messages_scanned || 0);
   const gmailTool = String(meta.gmail_tool_used || 'none');
   const gmailError = meta.gmail_error ? String(meta.gmail_error) : null;
@@ -287,10 +426,14 @@ async function main() {
     console.log(`  gmail_error: ${gmailError}`);
   }
 
-  if (!gmailChecked) {
+  if (!gmailChecked && isAuthIntervention(gmailError)) {
     throw new Error(
       'NEEDS_INTERVENTION: Gmail email intake did not run. Check Google Workspace MCP credentials.'
     );
+  }
+
+  if (!gmailChecked) {
+    console.warn('Gmail intake reported unchecked without auth error. Continuing in fallback mode.');
   }
 
   for (const source of OUTPUT_SOURCES) {

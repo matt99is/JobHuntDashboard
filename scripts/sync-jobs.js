@@ -14,7 +14,8 @@ import { query } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const SOURCES = ['linkedin', 'uiuxjobsboard', 'workinstartups', 'indeed', 'adzuna'];
+const SOURCES = ['gmail', 'adzuna'];
+const MIN_SALARY = Number(process.env.JOB_MIN_SALARY || 50000);
 
 // Generate consistent job ID for deduplication
 function generateId(job) {
@@ -44,16 +45,201 @@ function loadCandidates() {
   return all;
 }
 
-// Dedupe by company+title (keep highest score)
+function extractSalaryBounds(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? { min: value, max: value } : null;
+  }
+
+  const text = String(value).toLowerCase().replace(/,/g, '');
+  const matches = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(k)?/g)];
+  if (matches.length === 0) return null;
+
+  const numbers = matches
+    .map(([, raw, k]) => {
+      const num = Number(raw);
+      if (!Number.isFinite(num)) return null;
+      return k ? num * 1000 : num;
+    })
+    .filter((num) => Number.isFinite(num) && num > 0);
+
+  if (numbers.length === 0) return null;
+  return {
+    min: Math.min(...numbers),
+    max: Math.max(...numbers),
+  };
+}
+
+function normalizeDedupeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCompanyForDedupe(company) {
+  return normalizeDedupeText(company).replace(/\b(ltd|limited|llp|inc|corp|co|plc)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeTitleForDedupe(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function descriptionFingerprint(description) {
+  return normalizeDedupeText(description).slice(0, 120);
+}
+
+function canonicalizeUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(String(url));
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.replace(/\/+$/, '');
+    return `${host}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+function sourceCompanyTitleKey(job) {
+  const sourceKey = normalizeDedupeText(job.source);
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `sct:${sourceKey}|${companyKey}|${titleKey}`;
+}
+
+function companyTitleKey(job) {
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  return `ct:${companyKey}|${titleKey}`;
+}
+
+function buildDedupeKeys(job) {
+  const keys = [];
+  const canonicalUrl = canonicalizeUrl(job.url);
+  if (canonicalUrl) {
+    keys.push(`url:${canonicalUrl}`);
+  }
+
+  keys.push(sourceCompanyTitleKey(job));
+  keys.push(companyTitleKey(job));
+
+  const companyKey = normalizeCompanyForDedupe(job.company);
+  const titleKey = normalizeTitleForDedupe(job.title);
+  const salaryKey = extractSalaryBounds(job.salary)?.max ?? '';
+  const descKey = descriptionFingerprint(job.description);
+  keys.push(`content:${companyKey}|${titleKey}|${salaryKey}|${descKey}`);
+
+  return keys;
+}
+
+function normalizeSourceTag(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function mergeSourceTags(...values) {
+  const tags = new Set(values.flatMap((value) => normalizeSourceTag(value)));
+  if (tags.size === 0) return null;
+  return [...tags].sort().join(',');
+}
+
+// Dedupe by canonical URL and fuzzy content key (keep highest score / freshest).
 function dedupe(jobs) {
-  const seen = new Map();
-  for (const job of jobs) {
-    const key = `${job.company?.toLowerCase()}-${job.title?.toLowerCase()}`;
-    if (!seen.has(key) || job.suitability > seen.get(key).suitability) {
-      seen.set(key, job);
+  const sorted = [...jobs].sort((a, b) => {
+    const bySuitability = Number(b.suitability || 0) - Number(a.suitability || 0);
+    if (bySuitability !== 0) return bySuitability;
+    const byPosted = new Date(b.postedAt || 0).getTime() - new Date(a.postedAt || 0).getTime();
+    return byPosted;
+  });
+
+  const keyOwners = new Map();
+  const deduped = [];
+
+  for (const job of sorted) {
+    const keys = buildDedupeKeys(job);
+    const owner = keys.find((key) => keyOwners.has(key));
+    if (owner) {
+      const winnerIndex = keyOwners.get(owner);
+      deduped[winnerIndex].source = mergeSourceTags(deduped[winnerIndex].source, job.source);
+      continue;
+    }
+
+    const normalized = {
+      ...job,
+      source: mergeSourceTags(job.source),
+    };
+    const index = deduped.push(normalized) - 1;
+    keys.forEach((key) => keyOwners.set(key, index));
+  }
+
+  return deduped;
+}
+
+function normalizeApplicationType(rawType, company = '', description = '') {
+  const text = `${rawType || ''} ${company || ''} ${description || ''}`.toLowerCase();
+  const recruiterSignals = [
+    'recruiter',
+    'recruitment',
+    'agency',
+    'staffing',
+    'talent partner',
+    'headhunter',
+  ];
+  return recruiterSignals.some((signal) => text.includes(signal)) ? 'recruiter' : 'direct';
+}
+
+function normalizeSeniority(rawSeniority, title = '') {
+  const text = `${rawSeniority || ''} ${title || ''}`.toLowerCase();
+  if (text.includes('lead') || text.includes('principal') || text.includes('head')) return 'lead';
+  if (text.includes('senior') || text.includes('sr')) return 'senior';
+  if (text.includes('junior') || text.includes('entry')) return 'junior';
+  return 'mid';
+}
+
+function normalizeRoleType(rawRoleType, title = '', description = '') {
+  const text = `${rawRoleType || ''} ${title || ''} ${description || ''}`.toLowerCase();
+  return text.includes('product') ? 'product' : 'ux';
+}
+
+function normalizeFreshness(rawFreshness, postedAt) {
+  const fromPostedAt = (() => {
+    if (!postedAt) return null;
+    const posted = new Date(postedAt);
+    if (Number.isNaN(posted.getTime())) return null;
+    const days = Math.floor((Date.now() - posted.getTime()) / (1000 * 60 * 60 * 24));
+    if (days < 0) return null;
+    if (days < 7) return 'fresh';
+    if (days <= 30) return 'recent';
+    return 'stale';
+  })();
+  if (fromPostedAt) return fromPostedAt;
+
+  const text = String(rawFreshness || '').toLowerCase();
+  if (!text) return 'unknown';
+  if (text.includes('fresh')) return 'fresh';
+  if (text.includes('recent')) return 'recent';
+  if (text.includes('stale')) return 'stale';
+
+  const dayMatch = text.match(/(\d+)\s*day/);
+  if (dayMatch) {
+    const days = Number(dayMatch[1]);
+    if (Number.isFinite(days)) {
+      if (days < 7) return 'fresh';
+      if (days <= 30) return 'recent';
+      return 'stale';
     }
   }
-  return Array.from(seen.values());
+
+  return 'unknown';
 }
 
 // Global suitability cutoff (scores below this are never synced to dashboard).
@@ -65,20 +251,22 @@ function toDbRow(job) {
   // Check both old (directUrl) and new (directJobUrl) field names for compatibility
   const directUrl = job.directJobUrl || job.directUrl || null;
   const hasResearch = directUrl !== null || job.redFlags !== undefined;
+  const title = job.title || '';
+  const description = job.description || '';
 
   return {
     id: job.id,
-    title: job.title,
+    title,
     company: job.company,
     location: job.location || null,
     url: job.url || null,
     salary: job.salary || null,
     remote: job.remote || false,
-    seniority: job.seniority || null,
-    role_type: job.roleType || null,
-    application_type: job.type || null,
-    freshness: job.freshness || 'unknown',
-    description: job.description || null,
+    seniority: normalizeSeniority(job.seniority, title),
+    role_type: normalizeRoleType(job.roleType, title, description),
+    application_type: normalizeApplicationType(job.type, job.company, description),
+    freshness: normalizeFreshness(job.freshness, job.postedAt),
+    description: description || null,
     source: job.source || null,
     status: 'new',
     suitability: suitability,
@@ -163,7 +351,7 @@ async function main() {
   console.log('Checking existing jobs...');
   let existing = [];
   try {
-    const existingResult = await query('SELECT id, title, company FROM jobs');
+    const existingResult = await query('SELECT id, source, title, company, url, salary, description FROM jobs');
     existing = existingResult.rows;
   } catch (error) {
     console.error('Failed to fetch existing jobs:', error.message);
@@ -171,12 +359,16 @@ async function main() {
   }
 
   const existingIds = new Set(existing.map(j => j.id));
-  const existingKeys = new Set(existing.map(j => `${j.company?.toLowerCase()}-${j.title?.toLowerCase()}`));
+  const existingKeys = new Set();
+  for (const row of existing) {
+    for (const key of buildDedupeKeys(row)) {
+      existingKeys.add(key);
+    }
+  }
 
   // Filter new jobs
   const newJobs = unique.filter(j => {
-    const key = `${j.company?.toLowerCase()}-${j.title?.toLowerCase()}`;
-    return !existingIds.has(j.id) && !existingKeys.has(key);
+    return !existingIds.has(j.id) && !buildDedupeKeys(j).some((key) => existingKeys.has(key));
   });
 
   // Filter out expired jobs (marked during research phase)
@@ -187,9 +379,19 @@ async function main() {
     console.log(`Filtered out ${expiredCount} expired jobs\n`);
   }
 
+  const salaryEligibleJobs = activeJobs.filter((j) => {
+    const bounds = extractSalaryBounds(j.salary);
+    return bounds && Number.isFinite(bounds.max) && bounds.max > MIN_SALARY;
+  });
+  const droppedLowOrUnknownSalary = activeJobs.length - salaryEligibleJobs.length;
+
+  if (droppedLowOrUnknownSalary > 0) {
+    console.log(`Filtered out ${droppedLowOrUnknownSalary} jobs without salary above £${MIN_SALARY.toLocaleString()}\n`);
+  }
+
   // Enforce minimum suitability cutoff before insertion.
-  const cutoffJobs = activeJobs.filter((j) => Number(j.suitability || 0) >= SCORE_CUTOFF);
-  const droppedLowScore = activeJobs.length - cutoffJobs.length;
+  const cutoffJobs = salaryEligibleJobs.filter((j) => Number(j.suitability || 0) >= SCORE_CUTOFF);
+  const droppedLowScore = salaryEligibleJobs.length - cutoffJobs.length;
 
   if (droppedLowScore > 0) {
     console.log(`Filtered out ${droppedLowScore} jobs below score cutoff (${SCORE_CUTOFF})\n`);

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Intake pipeline now uses only two active sources: `gmail` + `adzuna`
+- Gather step (`scripts/gather-with-claude.js`) now outputs `candidates/gmail.json` only and is constrained to Gmail label window intake + web enrichment
+- Cross-source deduplication is now source-agnostic across filter/sync/API paths, with merged source provenance (for example `adzuna,gmail`)
+- Existing-db duplicate checks in `filter-new` and `sync-jobs` now use the same canonical dedupe keyset as in-run dedupe
+
+### Documentation
+
+- Rewrote `README.md` as current-state overview and command index
+- Rewrote `docs/SERVER-SETUP.md` to match current setup scripts and required Gmail/Adzuna env values
+- Rewrote `docs/LOCAL-AUTOMATION-GUIDE.md` to match lock/log/run artifact behavior and intervention handling
+- Updated `docs/DEVELOPER-GUIDE.md` with current pipeline contract, dedupe model, and DRY doc boundaries
+- Updated `agents/CLAUDE.md` to match active sources and pipeline behavior
+
 ## [1.2.0] - 2026-02-19
 
 ### Added

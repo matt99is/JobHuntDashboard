@@ -131,7 +131,7 @@ async function main() {
       runStep(runState, 'fetch-adzuna', 'npm', ['run', 'fetch:adzuna']),
     ]);
 
-    // Phase 2: AI gathering from email + scrape-only sources
+    // Phase 2: AI gathering from Gmail label alerts (with web enrichment)
     await runStep(runState, 'gather-with-claude', 'node', ['scripts/gather-with-claude.js']);
 
     // Phase 3: dedupe/filter with configured score cutoff
